@@ -134,12 +134,10 @@ final class DisplaySelector: NSObject, NSMenuDelegate {
 
         selectionMenu = menu
 
-        // Show menu at mouse location on the main screen
-        if let screen = NSScreen.main {
-            let mouseLocation = NSEvent.mouseLocation
-            // Convert to screen coordinates for the menu
-            menu.popUp(positioning: nil, at: mouseLocation, in: nil)
-        }
+        // Show menu at mouse location
+        let mouseLocation = NSEvent.mouseLocation
+        // Convert to screen coordinates for the menu
+        menu.popUp(positioning: nil, at: mouseLocation, in: nil)
     }
 
     /// Called when a display item is clicked

@@ -55,6 +55,14 @@ struct SettingsView: View {
                 Label("Keyboard Shortcuts", systemImage: "keyboard")
             }
 
+            // OCR Settings Section
+            Section {
+                OCRRecognitionLevelPicker(viewModel: viewModel)
+                OCRLanguagePicker(viewModel: viewModel)
+            } header: {
+                Label("OCR", systemImage: "doc.text.viewfinder")
+            }
+
             // Annotation Settings Section
             Section {
                 StrokeColorPicker(viewModel: viewModel)
@@ -521,6 +529,37 @@ private struct TextSizeSlider: View {
                     .frame(width: 40)
             }
         }
+    }
+}
+
+// MARK: - OCR Recognition Level Picker
+
+private struct OCRRecognitionLevelPicker: View {
+    @Bindable var viewModel: SettingsViewModel
+
+    var body: some View {
+        Picker("Recognition Level", selection: $viewModel.ocrRecognitionLevel) {
+            Text("Accurate (slower)").tag(OCRRecognitionLevel.accurate)
+            Text("Fast (quicker)").tag(OCRRecognitionLevel.fast)
+        }
+        .pickerStyle(.menu)
+        .help("Accurate mode provides better text recognition but takes longer")
+    }
+}
+
+// MARK: - OCR Language Picker
+
+private struct OCRLanguagePicker: View {
+    @Bindable var viewModel: SettingsViewModel
+
+    var body: some View {
+        Picker("Language", selection: $viewModel.ocrLanguage) {
+            ForEach(OCRManager.commonLanguages(), id: \.code) { language in
+                Text(language.name).tag(language.code)
+            }
+        }
+        .pickerStyle(.menu)
+        .help("Select the primary language for text recognition")
     }
 }
 

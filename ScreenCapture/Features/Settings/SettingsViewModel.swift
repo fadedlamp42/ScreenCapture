@@ -118,6 +118,18 @@ final class SettingsViewModel {
         set { settings.textSize = newValue }
     }
 
+    /// OCR recognition level
+    var ocrRecognitionLevel: OCRRecognitionLevel {
+        get { settings.ocrRecognitionLevel }
+        set { settings.ocrRecognitionLevel = newValue }
+    }
+
+    /// OCR language
+    var ocrLanguage: String {
+        get { settings.ocrLanguage }
+        set { settings.ocrLanguage = newValue }
+    }
+
     // MARK: - Validation Ranges
 
     /// Valid range for stroke width

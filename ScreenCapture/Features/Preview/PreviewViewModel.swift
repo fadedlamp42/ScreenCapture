@@ -64,6 +64,18 @@ final class PreviewViewModel {
     /// Whether copy is in progress
     private(set) var isCopying: Bool = false
 
+    /// Whether OCR is in progress
+    private(set) var isProcessingOCR: Bool = false
+
+    /// Current OCR result to display
+    private(set) var ocrResult: OCRResult?
+
+    /// Whether to show OCR results sheet
+    var showOCRResultsSheet: Bool = false
+
+    /// OCR error message
+    var ocrErrorMessage: String?
+
     /// Callback when the preview should be dismissed
     @ObservationIgnored
     var onDismiss: (() -> Void)?
@@ -87,6 +99,10 @@ final class PreviewViewModel {
     /// Recent captures store
     @ObservationIgnored
     private let recentCapturesStore: RecentCapturesStore
+
+    /// OCR manager for text recognition
+    @ObservationIgnored
+    private let ocrManager = OCRManager.shared
 
     // MARK: - Annotation Tools
 
@@ -939,6 +955,64 @@ final class PreviewViewModel {
         Task {
             try? await Task.sleep(for: .seconds(3))
             errorMessage = nil
+        }
+    }
+
+    /// Performs OCR on current screenshot
+    func performOCR() async {
+        isProcessingOCR = true
+
+        let startTime = Date()
+
+        do {
+            let level: OCRManager.RecognitionLevel
+            switch settings.ocrRecognitionLevel {
+            case .accurate: level = .accurate
+            case .fast: level = .fast
+            }
+
+            let textRegions = try await ocrManager.recognizeText(
+                from: screenshot.image,
+                languages: [settings.ocrLanguage],
+                level: level,
+                usesLanguageCorrection: (level == .accurate)
+            )
+
+            let fullText = textRegions.map { $0.text }.joined(separator: "\n")
+            let processingTime = Date().timeIntervalSince(startTime)
+
+            ocrResult = OCRResult(
+                fullText: fullText,
+                textRegions: textRegions,
+                processingTime: processingTime,
+                language: settings.ocrLanguage
+            )
+
+            showOCRResultsSheet = true
+        } catch {
+            ocrErrorMessage = "OCR failed: \(error.localizedDescription)"
+            clearOCRError()
+        }
+
+        isProcessingOCR = false
+    }
+
+    /// Copies OCR result to clipboard
+    func copyOCRText() {
+        guard let result = ocrResult else { return }
+        do {
+            try clipboardService.copyText(result.fullText)
+        } catch {
+            errorMessage = "Failed to copy to clipboard"
+            clearError()
+        }
+    }
+
+    /// Clears OCR error after delay
+    private func clearOCRError() {
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            ocrErrorMessage = nil
         }
     }
 }

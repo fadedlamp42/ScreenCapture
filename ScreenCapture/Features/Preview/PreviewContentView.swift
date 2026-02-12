@@ -47,6 +47,25 @@ struct PreviewContentView: View {
         } message: { message in
             Text(message)
         }
+        .alert(
+            "OCR Error",
+            isPresented: .constant(viewModel.ocrErrorMessage != nil),
+            presenting: viewModel.ocrErrorMessage
+        ) { _ in
+            Button("OK") {
+                viewModel.ocrErrorMessage = nil
+            }
+        } message: { message in
+            Text(message)
+        }
+        .sheet(isPresented: $viewModel.showOCRResultsSheet) {
+            OCRResultsSheet(
+                ocrResult: viewModel.ocrResult,
+                isProcessing: viewModel.isProcessingOCR,
+                onCopy: { viewModel.copyOCRText() },
+                onClose: { viewModel.showOCRResultsSheet = false }
+            )
+        }
     }
 
     // MARK: - Subviews
@@ -796,6 +815,34 @@ struct PreviewContentView: View {
     /// Action buttons for save, copy, etc.
     private var actionButtons: some View {
         HStack(spacing: 8) {
+            // OCR button
+            Button {
+                Task { await viewModel.performOCR() }
+            } label: {
+                if viewModel.isProcessingOCR {
+                    if reduceMotion {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 16, height: 16)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 16, height: 16)
+                    }
+                } else {
+                    Image(systemName: "doc.text.viewfinder")
+                }
+            }
+            .disabled(viewModel.isProcessingOCR)
+            .buttonStyle(.accessoryBar)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .help("Recognize text (O)")
+            .accessibilityLabel(Text(viewModel.isProcessingOCR ? "Recognizing text" : "Recognize text"))
+            .accessibilityHint(Text("Press O"))
+
+            Divider()
+                .frame(height: 16)
+                .accessibilityHidden(true)
+
             // Crop button
             Button {
                 viewModel.toggleCropMode()

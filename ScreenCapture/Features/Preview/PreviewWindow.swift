@@ -313,6 +313,12 @@ final class PreviewWindow: NSPanel {
                     }
                     return
                 }
+            case "o":
+                // O key to perform OCR
+                Task { @MainActor in
+                    await viewModel.performOCR()
+                }
+                return
             default:
                 break
             }

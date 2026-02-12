@@ -1,6 +1,12 @@
 import Foundation
 import SwiftUI
 
+/// OCR recognition level for text recognition.
+enum OCRRecognitionLevel: String, Codable, Sendable {
+    case accurate
+    case fast
+}
+
 /// User preferences persisted across sessions via UserDefaults.
 /// All properties automatically sync to UserDefaults with the `ScreenCapture.` prefix.
 @MainActor
@@ -26,6 +32,8 @@ final class AppSettings {
         static let textSize = prefix + "textSize"
         static let rectangleFilled = prefix + "rectangleFilled"
         static let recentCaptures = prefix + "recentCaptures"
+        static let ocrRecognitionLevel = prefix + "ocrRecognitionLevel"
+        static let ocrLanguage = prefix + "ocrLanguage"
     }
 
     // MARK: - Properties
@@ -85,6 +93,16 @@ final class AppSettings {
         didSet { saveRecentCaptures() }
     }
 
+    /// OCR recognition level (accurate or fast)
+    var ocrRecognitionLevel: OCRRecognitionLevel {
+        didSet { save(ocrRecognitionLevel.rawValue, forKey: Keys.ocrRecognitionLevel) }
+    }
+
+    /// OCR language code (e.g., "en-US")
+    var ocrLanguage: String {
+        didSet { save(ocrLanguage, forKey: Keys.ocrLanguage) }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -128,6 +146,15 @@ final class AppSettings {
         strokeWidth = CGFloat(defaults.object(forKey: Keys.strokeWidth) as? Double ?? 2.0)
         textSize = CGFloat(defaults.object(forKey: Keys.textSize) as? Double ?? 14.0)
         rectangleFilled = defaults.object(forKey: Keys.rectangleFilled) as? Bool ?? false
+
+        // Load OCR settings
+        if let ocrLevelRaw = defaults.string(forKey: Keys.ocrRecognitionLevel),
+           let ocrLevel = OCRRecognitionLevel(rawValue: ocrLevelRaw) {
+            ocrRecognitionLevel = ocrLevel
+        } else {
+            ocrRecognitionLevel = .accurate
+        }
+        ocrLanguage = defaults.string(forKey: Keys.ocrLanguage) ?? "en-US"
 
         // Load recent captures
         recentCaptures = Self.loadRecentCaptures()
@@ -177,6 +204,8 @@ final class AppSettings {
         strokeWidth = 2.0
         textSize = 14.0
         rectangleFilled = false
+        ocrRecognitionLevel = .accurate
+        ocrLanguage = "en-US"
         recentCaptures = []
     }
 

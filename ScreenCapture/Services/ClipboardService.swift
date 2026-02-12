@@ -40,9 +40,21 @@ struct ClipboardService: Sendable {
 
     /// Copies an image (without annotations) to the system clipboard.
     /// - Parameter image: The image to copy
-    /// - Throws: ScreenCaptureError.clipboardWriteFailed if the operation fails
+    /// - Throws: ScreenCaptureError.clipboardWriteFailed if operation fails
     func copy(_ image: CGImage) throws {
         try copy(image, annotations: [])
+    }
+
+    /// Copies text to the system clipboard.
+    /// - Parameter text: The text string to copy
+    /// - Throws: ScreenCaptureError.clipboardWriteFailed if operation fails
+    func copyText(_ text: String) throws {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+
+        guard pasteboard.setString(text, forType: .string) else {
+            throw ScreenCaptureError.clipboardWriteFailed
+        }
     }
 
     /// Checks if the clipboard currently contains an image.
