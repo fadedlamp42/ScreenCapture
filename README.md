@@ -57,3 +57,23 @@ Download the latest release and drag to Applications folder.
 ## License
 
 MIT License
+
+# tasks
+
+## my opencode sessions
+
+`ses_376a9853bffeRs3RGWRCCQuDTK` - initial version fix, plans for next features
+
+## todo
+
+## ongoing
+
+### active
+
+### passive
+
+### waiting
+
+## done
+
+## cancelled
