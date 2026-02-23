@@ -14,7 +14,7 @@ A fast, lightweight macOS menu bar app for capturing screenshots with OCR text r
 
 ## Requirements
 
-- macOS 13.0 (Ventura) or later
+- macOS 14.0 (Sonoma) or later
 - Screen Recording permission (System Settings → Privacy & Security)
 
 ## Installation

@@ -5,7 +5,7 @@
 ScreenCapture is a fast, lightweight macOS menu bar application for capturing and annotating screenshots. It uses Apple's ScreenCaptureKit API and provides annotation tools similar to professional screenshot utilities.
 
 **Tech Stack:** Swift 6.2, SwiftUI + AppKit, ScreenCaptureKit, CoreGraphics
-**Minimum macOS:** 13.0 (Ventura)
+**Minimum macOS:** 14.0 (Sonoma)
 **Build System:** Xcode 15.0+
 
 ## Build & Run
