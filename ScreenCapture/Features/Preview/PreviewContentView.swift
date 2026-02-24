@@ -14,9 +14,6 @@ struct PreviewContentView: View {
     @State private var imageScale: CGFloat = 1.0
     @State private var imageOffset: CGPoint = .zero
 
-    /// Focus state for the text input field
-    @FocusState private var isTextFieldFocused: Bool
-
     /// Double-click detection state
     @State private var lastTapTime: Date?
     @State private var lastTapPosition: CGPoint?
@@ -317,7 +314,6 @@ struct PreviewContentView: View {
                             // Commit text on click-away
                             if viewModel.isWaitingForTextInput {
                                 viewModel.commitTextInput()
-                                isTextFieldFocused = false
                             }
 
                             // Double-click detection
@@ -358,7 +354,7 @@ struct PreviewContentView: View {
             )
     }
 
-    /// Text input field for text annotations
+    /// Text input field for text annotations (uses NSTextView for pixel-perfect Canvas alignment)
     private func textInputField(
         at position: CGPoint,
         scale: CGFloat
@@ -367,28 +363,24 @@ struct PreviewContentView: View {
             x: position.x * scale,
             y: position.y * scale
         )
+        let fontSize = viewModel.textInputFontSize * scale
+        let nsFont = NSFont.systemFont(ofSize: fontSize)
+        let nsColor = NSColor(AppSettings.shared.strokeColor.color)
 
-        return TextEditor(text: $viewModel.textInputContent)
-            .font(.system(size: viewModel.textInputFontSize * scale))
-            .foregroundColor(AppSettings.shared.strokeColor.color)
-            .scrollContentBackground(.hidden)
-            .padding(4)
-            .frame(minWidth: 200, maxWidth: 200, minHeight: 28)
-            .fixedSize(horizontal: false, vertical: true)
-            .overlay(
-                RoundedRectangle(cornerRadius: 2)
-                    .stroke(Color.accentColor.opacity(0.4), style: SwiftUI.StrokeStyle(lineWidth: 1, dash: [3, 2]))
-            )
-            .offset(x: scaledPosition.x, y: scaledPosition.y)
-            .focused($isTextFieldFocused)
-            .onAppear {
-                isTextFieldFocused = true
-            }
-            .onExitCommand {
-                // Escape commits the text (same as click-away)
+        return InlineTextEditor(
+            text: $viewModel.textInputContent,
+            font: nsFont,
+            textColor: nsColor,
+            onEscape: {
                 viewModel.commitTextInput()
-                isTextFieldFocused = false
             }
+        )
+        .frame(minWidth: 100, maxWidth: 300, alignment: .topLeading)
+        .overlay(
+            RoundedRectangle(cornerRadius: 2)
+                .stroke(Color.accentColor.opacity(0.4), style: SwiftUI.StrokeStyle(lineWidth: 1, dash: [3, 2]))
+        )
+        .offset(x: scaledPosition.x, y: scaledPosition.y)
     }
 
     /// Active tool indicator badge
@@ -1018,6 +1010,112 @@ struct CropDimOverlay: Shape {
         path.addRect(rect)
         path.addRect(cropRect)
         return path
+    }
+}
+
+// MARK: - Inline Text Editor
+
+/// NSTextView subclass with Escape key handling for inline text editing
+private final class InlineNSTextView: NSTextView {
+    var onEscape: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+}
+
+/// NSViewRepresentable for pixel-perfect text editing that matches Canvas rendering.
+/// Uses NSTextView with zero padding (textContainerInset + lineFragmentPadding) so text
+/// position aligns exactly with context.draw(..., anchor: .topLeading) in AnnotationCanvas.
+private struct InlineTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    var font: NSFont
+    var textColor: NSColor
+    var onEscape: () -> Void
+
+    func makeNSView(context: Context) -> InlineNSTextView {
+        let textView = InlineNSTextView()
+        textView.delegate = context.coordinator
+        textView.font = font
+        textView.textColor = textColor
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.allowsUndo = true
+
+        // zero padding to match Canvas .topLeading text rendering
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+
+        // disable auto-corrections that mess with user input
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+
+        // grow vertically with content, fixed horizontal
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+
+        textView.onEscape = onEscape
+        textView.string = text
+
+        // become first responder once in the view hierarchy
+        DispatchQueue.main.async {
+            textView.window?.makeFirstResponder(textView)
+        }
+
+        return textView
+    }
+
+    func updateNSView(_ textView: InlineNSTextView, context: Context) {
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.font = font
+        textView.textColor = textColor
+        textView.onEscape = onEscape
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView textView: InlineNSTextView,
+        context: Context
+    ) -> CGSize? {
+        guard let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return nil }
+
+        // use proposed width so the text wraps at the frame boundary
+        let proposedWidth = proposal.width ?? 200
+        textContainer.containerSize = NSSize(width: proposedWidth, height: CGFloat.greatestFiniteMagnitude)
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        let lineHeight = textView.font?.pointSize ?? 14
+
+        return CGSize(
+            width: max(usedRect.width + 1, 100),
+            height: max(usedRect.height + 2, lineHeight * 1.3)
+        )
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: InlineTextEditor
+
+        init(_ parent: InlineTextEditor) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
     }
 }
 

@@ -135,6 +135,9 @@ final class PreviewViewModel {
     /// Observable position for text input field
     private(set) var _textInputPosition: CGPoint?
 
+    /// Observable text content (mirrors textTool.currentText but tracked by @Observable)
+    var _textInputContent: String = ""
+
     // MARK: - Annotation Selection & Editing
 
     /// Index of the currently selected annotation (nil = none selected)
@@ -181,10 +184,13 @@ final class PreviewViewModel {
         _isWaitingForTextInput
     }
 
-    /// The current text input content
+    /// The current text input content (tracked for observation, mirrored to textTool)
     var textInputContent: String {
-        get { textTool.currentText }
-        set { textTool.updateText(newValue) }
+        get { _textInputContent }
+        set {
+            _textInputContent = newValue
+            textTool.updateText(newValue)
+        }
     }
 
     /// The position for text input field
@@ -388,6 +394,7 @@ final class PreviewViewModel {
             textTool.textStyle = textStyle
             textTool.beginDrawing(at: point)
             // Update observable properties for text input UI
+            _textInputContent = ""
             _isWaitingForTextInput = true
             _textInputPosition = point
         }
@@ -458,6 +465,7 @@ final class PreviewViewModel {
         arrowTool.cancelDrawing()
         textTool.cancelDrawing()
         _currentAnnotation = nil
+        _textInputContent = ""
         _isWaitingForTextInput = false
         _textInputPosition = nil
         drawingUpdateCounter += 1
@@ -626,6 +634,7 @@ final class PreviewViewModel {
         textTool.textStyle = textAnnotation.style
         textTool.beginDrawing(at: textAnnotation.position)
         textTool.updateText(textAnnotation.content)
+        _textInputContent = textAnnotation.content
 
         _isWaitingForTextInput = true
         _textInputPosition = textAnnotation.position
@@ -892,7 +901,7 @@ final class PreviewViewModel {
     func commitTextInput() {
         if let editIndex = editingAnnotationIndex {
             // Re-editing existing annotation: update in place
-            let text = textTool.currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = _textInputContent.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty, editIndex < annotations.count,
                case .text(var textAnnotation) = annotations[editIndex] {
                 pushUndoState()
@@ -909,6 +918,7 @@ final class PreviewViewModel {
             }
         }
         // Reset observable text input state
+        _textInputContent = ""
         _isWaitingForTextInput = false
         _textInputPosition = nil
     }
