@@ -1,3 +1,5 @@
+See `ses_3740246dfffenkdilGlPRD72mi` for stash
+
 # ScreenCapture
 
 A fast, lightweight macOS menu bar app for capturing screenshots with OCR text recognition.
