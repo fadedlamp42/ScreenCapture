@@ -368,6 +368,7 @@ final class SelectionOverlayView: NSView {
     // MARK: - Mouse Events
 
     override func mouseDown(with event: NSEvent) {
+        NSLog("[overlay] mouseDown received")
         let point = convert(event.locationInWindow, from: nil)
         selectionStart = point
         selectionCurrent = point
@@ -501,6 +502,15 @@ final class SelectionOverlayView: NSView {
         super.keyDown(with: event)
     }
 
+    // MARK: - First Click
+
+    /// Deliver the first click directly as a mouseDown instead of using it
+    /// to activate the window. critical for an .accessory (menu bar) app
+    /// where the app is never the "active" app.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     // MARK: - Cursor
 
     override func resetCursorRects() {
@@ -539,8 +549,12 @@ final class SelectionOverlayController {
 
     /// Presents selection overlay on all connected displays.
     func presentOverlay() async throws {
+        let t0 = CFAbsoluteTimeGetCurrent()
+
         // Get all available displays
         let displays = try await ScreenDetector.shared.availableDisplays()
+        let t1 = CFAbsoluteTimeGetCurrent()
+        NSLog("[overlay] availableDisplays: %.0fms", (t1 - t0) * 1000)
 
         // Get matching screens
         let screens = NSScreen.screens
@@ -562,17 +576,23 @@ final class SelectionOverlayController {
             overlayWindow.setDelegate(self)
             overlayWindows.append(overlayWindow)
         }
+        let t2 = CFAbsoluteTimeGetCurrent()
+        NSLog("[overlay] window creation: %.0fms", (t2 - t1) * 1000)
 
         // Show all overlay windows
         for window in overlayWindows {
             window.showOverlay()
         }
+        let t3 = CFAbsoluteTimeGetCurrent()
+        NSLog("[overlay] showOverlay: %.0fms", (t3 - t2) * 1000)
 
         // Make the first window (primary display) key
         if let primaryWindow = overlayWindows.first {
             primaryWindow.makeKey()
             NSApp.activate(ignoringOtherApps: true)
         }
+        let t4 = CFAbsoluteTimeGetCurrent()
+        NSLog("[overlay] activate+makeKey: %.0fms, total: %.0fms", (t4 - t3) * 1000, (t4 - t0) * 1000)
     }
 
     /// Dismisses all overlay windows.

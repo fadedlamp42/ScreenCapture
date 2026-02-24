@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import UniformTypeIdentifiers
 
 /// Service for copying screenshots to the system clipboard.
 /// Uses NSPasteboard for compatibility with all macOS applications.
@@ -8,13 +9,34 @@ import CoreGraphics
 struct ClipboardService: Sendable {
     // MARK: - Public API
 
-    /// Copies an image with annotations to the system clipboard.
+    /// Copies an image with annotations to the system clipboard,
+    /// encoded in the user's preferred format from settings.
     /// - Parameters:
     ///   - image: The base image to copy
     ///   - annotations: Annotations to composite onto the image
+    ///   - format: Export format (defaults to user's preference from AppSettings)
+    ///   - quality: Compression quality for lossy formats (defaults to user's preference)
     /// - Throws: ScreenCaptureError.clipboardWriteFailed if the operation fails
-    func copy(_ image: CGImage, annotations: [Annotation]) throws {
-        // Composite annotations if any exist
+    func copy(
+        _ image: CGImage,
+        annotations: [Annotation],
+        format: ExportFormat? = nil,
+        quality: Double? = nil
+    ) throws {
+        let settings = AppSettings.shared
+        let resolvedFormat = format ?? settings.defaultFormat
+        let resolvedQuality: Double
+        if let quality {
+            resolvedQuality = quality
+        } else {
+            switch resolvedFormat {
+            case .jpeg: resolvedQuality = settings.jpegQuality
+            case .heic: resolvedQuality = settings.heicQuality
+            case .png: resolvedQuality = 1.0
+            }
+        }
+
+        // composite annotations if any exist
         let finalImage: CGImage
         if annotations.isEmpty {
             finalImage = image
@@ -22,20 +44,21 @@ struct ClipboardService: Sendable {
             finalImage = try compositeAnnotations(annotations, onto: image)
         }
 
-        // Convert to NSImage
-        let nsImage = NSImage(
-            cgImage: finalImage,
-            size: NSSize(width: finalImage.width, height: finalImage.height)
-        )
-
-        // Write to pasteboard
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-
-        // Write both PNG and TIFF for maximum compatibility
-        guard pasteboard.writeObjects([nsImage]) else {
+        // encode image data in the configured format
+        guard let encodedData = encodeImage(finalImage, format: resolvedFormat, quality: resolvedQuality) else {
             throw ScreenCaptureError.clipboardWriteFailed
         }
+
+        // write a temp file to the clipboard so the receiving app
+        // gets the correct extension and format. raw image data on
+        // the pasteboard gets auto-converted by macOS (always ends up as PNG).
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScreenCapture.\(resolvedFormat.fileExtension)")
+        try encodedData.write(to: tempURL)
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([tempURL as NSURL])
     }
 
     /// Copies an image (without annotations) to the system clipboard.
@@ -64,6 +87,34 @@ struct ClipboardService: Sendable {
             NSPasteboard.PasteboardType.tiff.rawValue,
             NSPasteboard.PasteboardType.png.rawValue
         ])
+    }
+
+    // MARK: - Image Encoding
+
+    /// Encodes a CGImage as Data in the specified format.
+    private func encodeImage(_ image: CGImage, format: ExportFormat, quality: Double) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data as CFMutableData,
+            format.uti.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        var options: [CFString: Any] = [:]
+        if format == .jpeg || format == .heic {
+            options[kCGImageDestinationLossyCompressionQuality] = quality
+        }
+
+        CGImageDestinationAddImage(destination, image, options as CFDictionary)
+
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+
+        return data as Data
     }
 
     // MARK: - Annotation Compositing

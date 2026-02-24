@@ -48,9 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await registerHotkeys()
         }
 
-        // Check for screen recording permission on first launch
+        // Check for screen recording permission on first launch,
+        // then pre-warm the display cache so the first capture is snappy
         Task {
             await checkAndRequestScreenRecordingPermission()
+            _ = try? await ScreenDetector.shared.availableDisplays()
         }
 
         #if DEBUG
@@ -248,9 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        #if DEBUG
-        print("Selection capture triggered via hotkey or menu")
-        #endif
+        NSLog("[capture] selection hotkey triggered")
 
         isCaptureInProgress = true
 
