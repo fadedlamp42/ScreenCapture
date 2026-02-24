@@ -415,10 +415,10 @@ final class SelectionOverlayView: NSView {
             print("[5] NSScreen.screens.first?.frame: \(String(describing: NSScreen.screens.first?.frame))")
             #endif
 
-            // Get the screen height for coordinate conversion
-            // Use the window's screen, not necessarily the primary screen
-            // Cocoa uses Y=0 at bottom, ScreenCaptureKit/Quartz uses Y=0 at top
-            let screenHeight = window.screen?.frame.height ?? NSScreen.screens.first?.frame.height ?? 0
+            // Get the PRIMARY screen height for coordinate conversion
+            // Cocoa's global Y=0 is always at the bottom of the primary screen,
+            // so converting to Quartz (Y=0 at top) always needs the primary height
+            let screenHeight = NSScreen.screens.first?.frame.height ?? 0
 
             #if DEBUG
             print("[6] screenHeight for conversion: \(screenHeight)")

@@ -203,20 +203,13 @@ actor CaptureManager {
         let config = createCaptureConfiguration(for: display)
 
         // Set source rect for region capture
-        // sourceRect must be in PIXEL coordinates (not normalized!)
-        // The rect is in points from SelectionOverlayWindow, convert to pixels
-        // IMPORTANT: Round to integers to avoid fractional pixel boundaries
-        // which cause ScreenCaptureKit to apply anti-aliasing/interpolation
-        let pixelX = round(rect.origin.x * display.scaleFactor)
-        let pixelY = round(rect.origin.y * display.scaleFactor)
-        let pixelWidth = round(rect.width * display.scaleFactor)
-        let pixelHeight = round(rect.height * display.scaleFactor)
-
+        // sourceRect is in POINTS (display logical coordinates), not pixels
+        // config.width/height are the OUTPUT size in pixels
         let sourceRect = CGRect(
-            x: pixelX,
-            y: pixelY,
-            width: pixelWidth,
-            height: pixelHeight
+            x: round(rect.origin.x),
+            y: round(rect.origin.y),
+            width: round(rect.width),
+            height: round(rect.height)
         )
 
         #if DEBUG
@@ -224,15 +217,15 @@ actor CaptureManager {
         print("[CAP-1] Input rect (points): \(rect)")
         print("[CAP-2] display.frame (points): \(display.frame)")
         print("[CAP-3] display.scaleFactor: \(display.scaleFactor)")
-        print("[CAP-4] sourceRect (pixels, rounded): \(sourceRect)")
+        print("[CAP-4] sourceRect (points, rounded): \(sourceRect)")
         print("=== END CAPTURE MANAGER DEBUG ===")
         #endif
 
         config.sourceRect = sourceRect
 
-        // Adjust output size to match the region (use same rounded values)
-        config.width = Int(pixelWidth)
-        config.height = Int(pixelHeight)
+        // output size in pixels for full-resolution capture
+        config.width = Int(round(rect.width * display.scaleFactor))
+        config.height = Int(round(rect.height * display.scaleFactor))
 
         // Perform capture with signpost for profiling
         os_signpost(.begin, log: Self.performanceLog, name: "RegionCapture", signpostID: Self.signpostID)
