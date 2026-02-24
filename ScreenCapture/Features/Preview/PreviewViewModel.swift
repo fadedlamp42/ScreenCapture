@@ -140,6 +140,9 @@ final class PreviewViewModel {
     /// Index of the currently selected annotation (nil = none selected)
     var selectedAnnotationIndex: Int?
 
+    /// Index of annotation being re-edited (nil = creating new text)
+    var editingAnnotationIndex: Int?
+
     /// Whether we're currently dragging a selected annotation
     private(set) var isDraggingAnnotation: Bool = false
 
@@ -165,6 +168,7 @@ final class PreviewViewModel {
     private var currentTool: (any AnnotationTool)? {
         guard let selectedTool else { return nil }
         switch selectedTool {
+        case .select: return nil
         case .rectangle: return rectangleTool
         case .freehand: return freehandTool
         case .arrow: return arrowTool
@@ -186,6 +190,15 @@ final class PreviewViewModel {
     /// The position for text input field
     var textInputPosition: CGPoint? {
         _textInputPosition
+    }
+
+    /// Font size for the text input field (matches annotation being edited, or current settings)
+    var textInputFontSize: CGFloat {
+        if let editIndex = editingAnnotationIndex, editIndex < annotations.count,
+           case .text(let textAnnotation) = annotations[editIndex] {
+            return textAnnotation.style.fontSize
+        }
+        return settings.textSize
     }
 
     // MARK: - Computed Properties
@@ -340,7 +353,12 @@ final class PreviewViewModel {
     /// Begins a drawing gesture at the given point
     /// - Parameter point: The point in image coordinates
     func beginDrawing(at point: CGPoint) {
-        guard let selectedTool else { return }
+        guard let selectedTool, selectedTool.isDrawingTool else { return }
+
+        // Commit any in-progress text before starting new drawing
+        if _isWaitingForTextInput {
+            commitTextInput()
+        }
 
         // Apply current stroke/text styles from settings
         let strokeStyle = StrokeStyle(
@@ -354,6 +372,8 @@ final class PreviewViewModel {
         )
 
         switch selectedTool {
+        case .select:
+            return
         case .rectangle:
             rectangleTool.strokeStyle = strokeStyle
             rectangleTool.isFilled = settings.rectangleFilled
@@ -378,9 +398,11 @@ final class PreviewViewModel {
     /// Continues a drawing gesture to the given point
     /// - Parameter point: The point in image coordinates
     func continueDrawing(to point: CGPoint) {
-        guard let selectedTool else { return }
+        guard let selectedTool, selectedTool.isDrawingTool else { return }
 
         switch selectedTool {
+        case .select:
+            return
         case .rectangle:
             rectangleTool.continueDrawing(to: point)
         case .freehand:
@@ -397,11 +419,13 @@ final class PreviewViewModel {
     /// Ends a drawing gesture at the given point
     /// - Parameter point: The point in image coordinates
     func endDrawing(at point: CGPoint) {
-        guard let selectedTool else { return }
+        guard let selectedTool, selectedTool.isDrawingTool else { return }
 
         var annotation: Annotation?
 
         switch selectedTool {
+        case .select:
+            return
         case .rectangle:
             annotation = rectangleTool.endDrawing(at: point)
         case .freehand:
@@ -423,8 +447,12 @@ final class PreviewViewModel {
         }
     }
 
-    /// Cancels the current drawing operation
+    /// Cancels the current drawing operation (commits in-progress text instead of discarding)
     func cancelCurrentDrawing() {
+        // Commit any in-progress text input before canceling
+        if _isWaitingForTextInput {
+            commitTextInput()
+        }
         rectangleTool.cancelDrawing()
         freehandTool.cancelDrawing()
         arrowTool.cancelDrawing()
@@ -558,8 +586,8 @@ final class PreviewViewModel {
 
     /// Selects the annotation at the given index
     func selectAnnotation(at index: Int?) {
-        // Deselect any tool when selecting an annotation
-        if index != nil && selectedTool != nil {
+        // Deselect any drawing tool when selecting an annotation, but keep select tool
+        if index != nil && selectedTool != nil && selectedTool != .select {
             selectedTool = nil
         }
         selectedAnnotationIndex = index
@@ -571,6 +599,36 @@ final class PreviewViewModel {
         isDraggingAnnotation = false
         dragStartPoint = nil
         dragOriginalPosition = nil
+    }
+
+    /// Handles double-click on an annotation (re-edit text, select shapes)
+    func handleDoubleClick(at index: Int) {
+        guard index < annotations.count else { return }
+
+        // Double-click on text: re-enter editing mode
+        if case .text = annotations[index] {
+            beginEditingTextAnnotation(at: index)
+            return
+        }
+        // For other annotation types, just select (customization bar handles editing)
+        selectAnnotation(at: index)
+    }
+
+    /// Begins re-editing an existing text annotation
+    func beginEditingTextAnnotation(at index: Int) {
+        guard index < annotations.count,
+              case .text(let textAnnotation) = annotations[index] else { return }
+
+        editingAnnotationIndex = index
+        selectedAnnotationIndex = index
+
+        // Set up text tool state for editing
+        textTool.textStyle = textAnnotation.style
+        textTool.beginDrawing(at: textAnnotation.position)
+        textTool.updateText(textAnnotation.content)
+
+        _isWaitingForTextInput = true
+        _textInputPosition = textAnnotation.position
     }
 
     /// Deletes the currently selected annotation
@@ -830,10 +888,25 @@ final class PreviewViewModel {
         redoStack.removeAll()
     }
 
-    /// Commits the current text input and adds the annotation
+    /// Commits the current text input (creates new or updates existing annotation)
     func commitTextInput() {
-        if let annotation = textTool.commitText() {
-            addAnnotation(annotation)
+        if let editIndex = editingAnnotationIndex {
+            // Re-editing existing annotation: update in place
+            let text = textTool.currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty, editIndex < annotations.count,
+               case .text(var textAnnotation) = annotations[editIndex] {
+                pushUndoState()
+                textAnnotation.content = text
+                screenshot = screenshot.replacingAnnotation(at: editIndex, with: .text(textAnnotation))
+                redoStack.removeAll()
+            }
+            editingAnnotationIndex = nil
+            textTool.cancelDrawing()
+        } else {
+            // Creating new annotation
+            if let annotation = textTool.commitText() {
+                addAnnotation(annotation)
+            }
         }
         // Reset observable text input state
         _isWaitingForTextInput = false
@@ -1021,6 +1094,7 @@ final class PreviewViewModel {
 
 /// Available annotation tool types for the preview
 enum AnnotationToolType: String, CaseIterable, Identifiable, Sendable {
+    case select
     case rectangle
     case freehand
     case arrow
@@ -1028,8 +1102,14 @@ enum AnnotationToolType: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// whether this tool draws new annotations (vs selecting existing ones)
+    var isDrawingTool: Bool {
+        self != .select
+    }
+
     var displayName: String {
         switch self {
+        case .select: return "Select"
         case .rectangle: return "Rectangle"
         case .freehand: return "Draw"
         case .arrow: return "Arrow"
@@ -1039,6 +1119,7 @@ enum AnnotationToolType: String, CaseIterable, Identifiable, Sendable {
 
     var keyboardShortcut: Character {
         switch self {
+        case .select: return "v"
         case .rectangle: return "r"
         case .freehand: return "d"
         case .arrow: return "a"
@@ -1048,6 +1129,7 @@ enum AnnotationToolType: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
+        case .select: return "cursorarrow"
         case .rectangle: return "rectangle"
         case .freehand: return "pencil.line"
         case .arrow: return "arrow.up.right"

@@ -181,15 +181,18 @@ final class PreviewWindow: NSPanel {
 
     /// Handle key events for shortcuts
     override func keyDown(with event: NSEvent) {
-        // Check for Escape key to dismiss or deselect
+        // Check for Escape key - commit text first, then deselect, then dismiss
         if event.keyCode == 53 { // Escape
             Task { @MainActor in
-                if viewModel.selectedAnnotationIndex != nil {
+                if viewModel.isWaitingForTextInput {
+                    // Commit text input (Escape = commit, same as click-away)
+                    viewModel.commitTextInput()
+                } else if viewModel.selectedAnnotationIndex != nil {
                     // First deselect annotation
                     viewModel.deselectAnnotation()
-                } else if viewModel.selectedTool != nil {
-                    // Then deselect tool
-                    viewModel.selectTool(nil)
+                } else if viewModel.selectedTool != nil && viewModel.selectedTool != .select {
+                    // Deselect drawing tool (but not select tool)
+                    viewModel.selectTool(.select)
                 } else {
                     // Finally dismiss
                     viewModel.dismiss()
@@ -251,9 +254,15 @@ final class PreviewWindow: NSPanel {
             return
         }
 
-        // Check for tool shortcuts (R, D, A, T) and Escape to deselect
+        // Check for tool shortcuts (V, R, D, A, T)
         if let char = event.charactersIgnoringModifiers?.lowercased().first {
             switch char {
+            case "v":
+                Task { @MainActor in
+                    viewModel.selectTool(.select)
+                    viewModel.deselectAnnotation()
+                }
+                return
             case "r":
                 Task { @MainActor in
                     if viewModel.selectedTool == .rectangle {
@@ -290,8 +299,8 @@ final class PreviewWindow: NSPanel {
                     }
                 }
                 return
-            case "1", "2", "3", "4":
-                // Number keys to quickly select tools (1=Rectangle, 2=Freehand, 3=Arrow, 4=Text)
+            case "1", "2", "3", "4", "5":
+                // Number keys to quickly select tools (1=Select, 2=Rectangle, 3=Freehand, 4=Arrow, 5=Text)
                 let toolIndex = Int(String(char))! - 1
                 let tools = AnnotationToolType.allCases
                 if toolIndex < tools.count {

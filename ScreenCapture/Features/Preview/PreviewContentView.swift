@@ -17,6 +17,10 @@ struct PreviewContentView: View {
     /// Focus state for the text input field
     @FocusState private var isTextFieldFocused: Bool
 
+    /// Double-click detection state
+    @State private var lastTapTime: Date?
+    @State private var lastTapPosition: CGPoint?
+
     /// Environment variable for Reduce Motion preference
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -126,16 +130,16 @@ struct PreviewContentView: View {
                                 )
                             }
 
-                            // Drawing gesture overlay
-                            if viewModel.selectedTool != nil {
+                            // Drawing gesture overlay (only for drawing tools, not select)
+                            if let tool = viewModel.selectedTool, tool.isDrawingTool {
                                 drawingGestureOverlay(
                                     displaySize: displayInfo.displaySize,
                                     scale: displayInfo.scale
                                 )
                             }
 
-                            // Selection/editing gesture overlay (when no tool and no crop mode)
-                            if viewModel.selectedTool == nil && !viewModel.isCropMode {
+                            // Selection/editing gesture overlay (when select tool active, no tool, or no crop mode)
+                            if viewModel.selectedTool == nil || viewModel.selectedTool == .select, !viewModel.isCropMode {
                                 selectionGestureOverlay(
                                     displaySize: displayInfo.displaySize,
                                     scale: displayInfo.scale
@@ -235,6 +239,14 @@ struct PreviewContentView: View {
         }
 
         switch tool {
+        case .select:
+            if viewModel.isDraggingAnnotation {
+                return .closedHand
+            }
+            if viewModel.selectedAnnotationIndex != nil {
+                return .openHand
+            }
+            return .arrow
         case .rectangle, .freehand, .arrow:
             return .crosshair
         case .text:
@@ -286,7 +298,7 @@ struct PreviewContentView: View {
         )
     }
 
-    /// Overlay for selecting and dragging annotations
+    /// Overlay for selecting and dragging annotations (with double-click detection)
     private func selectionGestureOverlay(
         displaySize: CGSize,
         scale: CGFloat
@@ -302,17 +314,41 @@ struct PreviewContentView: View {
                         )
 
                         if value.translation == .zero {
-                            // First tap - check for hit
-                            if let hitIndex = viewModel.hitTest(at: point) {
-                                // Hit an annotation - select it and prepare for dragging
-                                viewModel.selectAnnotation(at: hitIndex)
-                                viewModel.beginDraggingAnnotation(at: point)
+                            // Commit text on click-away
+                            if viewModel.isWaitingForTextInput {
+                                viewModel.commitTextInput()
+                                isTextFieldFocused = false
+                            }
+
+                            // Double-click detection
+                            let now = Date()
+                            let isDoubleTap: Bool = {
+                                guard let lastTime = lastTapTime,
+                                      let lastPos = lastTapPosition else { return false }
+                                return now.timeIntervalSince(lastTime) < 0.35
+                                    && abs(point.x - lastPos.x) < 15
+                                    && abs(point.y - lastPos.y) < 15
+                            }()
+
+                            if isDoubleTap {
+                                lastTapTime = nil
+                                lastTapPosition = nil
+                                // Double-click: re-edit text annotations
+                                if let hitIndex = viewModel.hitTest(at: point) {
+                                    viewModel.handleDoubleClick(at: hitIndex)
+                                }
                             } else {
-                                // Clicked on empty space - deselect
-                                viewModel.deselectAnnotation()
+                                lastTapTime = now
+                                lastTapPosition = point
+                                // Single click: select and prepare for dragging
+                                if let hitIndex = viewModel.hitTest(at: point) {
+                                    viewModel.selectAnnotation(at: hitIndex)
+                                    viewModel.beginDraggingAnnotation(at: point)
+                                } else {
+                                    viewModel.deselectAnnotation()
+                                }
                             }
                         } else if viewModel.isDraggingAnnotation {
-                            // Dragging a selected annotation
                             viewModel.continueDraggingAnnotation(to: point)
                         }
                     }
@@ -332,25 +368,25 @@ struct PreviewContentView: View {
             y: position.y * scale
         )
 
-        return TextField("Enter text", text: $viewModel.textInputContent)
-            .textFieldStyle(.plain)
-            .font(.system(size: 14 * scale))
+        return TextEditor(text: $viewModel.textInputContent)
+            .font(.system(size: viewModel.textInputFontSize * scale))
             .foregroundColor(AppSettings.shared.strokeColor.color)
+            .scrollContentBackground(.hidden)
             .padding(4)
-            .background(Color.white.opacity(0.9))
-            .cornerRadius(4)
-            .frame(minWidth: 100, maxWidth: 300)
-            .position(x: scaledPosition.x + 50, y: scaledPosition.y + 10)
+            .frame(minWidth: 200, maxWidth: 200, minHeight: 28)
+            .fixedSize(horizontal: false, vertical: true)
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(Color.accentColor.opacity(0.4), style: SwiftUI.StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            )
+            .offset(x: scaledPosition.x, y: scaledPosition.y)
             .focused($isTextFieldFocused)
             .onAppear {
                 isTextFieldFocused = true
             }
-            .onSubmit {
-                viewModel.commitTextInput()
-                isTextFieldFocused = false
-            }
             .onExitCommand {
-                viewModel.cancelCurrentDrawing()
+                // Escape commits the text (same as click-away)
+                viewModel.commitTextInput()
                 isTextFieldFocused = false
             }
     }
@@ -574,8 +610,8 @@ struct PreviewContentView: View {
                 .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
 
-            // Show customization options when a tool is selected OR an annotation is selected
-            if viewModel.selectedTool != nil || viewModel.selectedAnnotationIndex != nil {
+            // Show customization options when a drawing tool is selected OR an annotation is selected
+            if (viewModel.selectedTool != nil && viewModel.selectedTool != .select) || viewModel.selectedAnnotationIndex != nil {
                 Divider()
                     .frame(height: 16)
 
