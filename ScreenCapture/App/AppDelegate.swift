@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Registered hotkey for selection capture
     private var selectionHotkeyRegistration: HotkeyManager.Registration?
 
+    /// Registered hotkey for video recording
+    private var recordingHotkeyRegistration: HotkeyManager.Registration?
+
     /// Shared app settings
     private let settings = AppSettings.shared
 
@@ -26,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Whether a capture is currently in progress (prevents overlapping captures)
     private var isCaptureInProgress = false
+
+    /// Whether a recording is currently in progress
+    private var isRecordingInProgress = false
 
     // MARK: - NSApplicationDelegate
 
@@ -122,40 +128,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func registerHotkeys() async {
         let hotkeyManager = HotkeyManager.shared
 
-        // Register full screen capture hotkey
-        do {
-            fullScreenHotkeyRegistration = try await hotkeyManager.register(
-                shortcut: settings.fullScreenShortcut
-            ) { [weak self] in
-                Task { @MainActor in
-                    self?.captureFullScreen()
+        // Register full screen capture hotkey (if bound)
+        if let shortcut = settings.fullScreenShortcut {
+            do {
+                fullScreenHotkeyRegistration = try await hotkeyManager.register(
+                    shortcut: shortcut
+                ) { [weak self] in
+                    Task { @MainActor in
+                        self?.captureFullScreen()
+                    }
                 }
+                #if DEBUG
+                print("Registered full screen hotkey: \(shortcut.displayString)")
+                #endif
+            } catch {
+                #if DEBUG
+                print("Failed to register full screen hotkey: \(error)")
+                #endif
             }
-            #if DEBUG
-            print("Registered full screen hotkey: \(settings.fullScreenShortcut.displayString)")
-            #endif
-        } catch {
-            #if DEBUG
-            print("Failed to register full screen hotkey: \(error)")
-            #endif
         }
 
-        // Register selection capture hotkey
-        do {
-            selectionHotkeyRegistration = try await hotkeyManager.register(
-                shortcut: settings.selectionShortcut
-            ) { [weak self] in
-                Task { @MainActor in
-                    self?.captureSelection()
+        // Register selection capture hotkey (if bound)
+        if let shortcut = settings.selectionShortcut {
+            do {
+                selectionHotkeyRegistration = try await hotkeyManager.register(
+                    shortcut: shortcut
+                ) { [weak self] in
+                    Task { @MainActor in
+                        self?.captureSelection()
+                    }
                 }
+                #if DEBUG
+                print("Registered selection hotkey: \(shortcut.displayString)")
+                #endif
+            } catch {
+                #if DEBUG
+                print("Failed to register selection hotkey: \(error)")
+                #endif
             }
-            #if DEBUG
-            print("Registered selection hotkey: \(settings.selectionShortcut.displayString)")
-            #endif
-        } catch {
-            #if DEBUG
-            print("Failed to register selection hotkey: \(error)")
-            #endif
+        }
+
+        // Register recording hotkey (if bound)
+        if let shortcut = settings.recordingShortcut {
+            do {
+                recordingHotkeyRegistration = try await hotkeyManager.register(
+                    shortcut: shortcut
+                ) { [weak self] in
+                    Task { @MainActor in
+                        self?.toggleRecording()
+                    }
+                }
+                #if DEBUG
+                print("Registered recording hotkey: \(shortcut.displayString)")
+                #endif
+            } catch {
+                #if DEBUG
+                print("Failed to register recording hotkey: \(error)")
+                #endif
+            }
         }
     }
 
@@ -171,6 +201,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let registration = selectionHotkeyRegistration {
             await hotkeyManager.unregister(registration)
             selectionHotkeyRegistration = nil
+        }
+
+        if let registration = recordingHotkeyRegistration {
+            await hotkeyManager.unregister(registration)
+            recordingHotkeyRegistration = nil
         }
     }
 
@@ -321,6 +356,191 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
+    // MARK: - Recording Actions
+
+    /// Toggles recording on/off. If recording, stops it. If not, starts selection flow.
+    @objc func toggleRecording() {
+        if isRecordingInProgress {
+            stopRecording()
+        } else {
+            startRecordingSelection()
+        }
+    }
+
+    /// Triggers the selection overlay for choosing a recording region
+    @objc func startRecordingSelection() {
+        guard !isRecordingInProgress, !isCaptureInProgress else {
+            #if DEBUG
+            print("Capture or recording already in progress, ignoring")
+            #endif
+            return
+        }
+
+        #if DEBUG
+        print("Recording selection triggered")
+        #endif
+
+        isCaptureInProgress = true
+
+        Task {
+            do {
+                let overlayController = SelectionOverlayController.shared
+
+                overlayController.onSelectionComplete = { [weak self] rect, display in
+                    Task { @MainActor in
+                        await self?.handleRecordingSelectionComplete(rect: rect, display: display)
+                    }
+                }
+
+                overlayController.onSelectionCancel = { [weak self] in
+                    Task { @MainActor in
+                        self?.isCaptureInProgress = false
+                        #if DEBUG
+                        print("Recording selection cancelled")
+                        #endif
+                    }
+                }
+
+                try await overlayController.presentOverlay()
+
+            } catch {
+                isCaptureInProgress = false
+                showCaptureError(.captureFailure(underlying: error))
+            }
+        }
+    }
+
+    /// Starts recording the selected region
+    private func handleRecordingSelectionComplete(rect: CGRect, display: DisplayInfo) async {
+        isCaptureInProgress = false
+
+        do {
+            isRecordingInProgress = true
+
+            #if DEBUG
+            print("Starting recording: \(Int(rect.width))x\(Int(rect.height)) on \(display.name)")
+            #endif
+
+            // show the recording frame border around the selected region.
+            // must be shown before starting the stream so SCShareableContent
+            // can find the window to exclude it from capture.
+            let frameWindowID = RecordingFrameController.shared.show(region: rect, on: display)
+
+            // show the recording overlay with stop button + timer
+            RecordingOverlayController.shared.show(on: display) { [weak self] in
+                self?.stopRecording()
+            }
+
+            // update the menu bar to show recording state
+            menuBarController?.setRecordingState(true)
+
+            // get the overlay window ID too so both UI windows are excluded
+            var excludedIDs: [CGWindowID] = [frameWindowID]
+            if let overlayID = RecordingOverlayController.shared.currentWindowID {
+                excludedIDs.append(overlayID)
+            }
+
+            // start recording, excluding our overlay windows from the capture
+            try await VideoRecorder.shared.startRegionRecording(
+                region: rect,
+                display: display,
+                excludedWindowIDs: excludedIDs
+            ) { [weak self] elapsed in
+                // update the overlay timer on every tick
+                self?.handleRecordingElapsedTime(elapsed)
+            }
+
+        } catch {
+            isRecordingInProgress = false
+            RecordingFrameController.shared.dismiss()
+            RecordingOverlayController.shared.dismiss()
+            menuBarController?.setRecordingState(false)
+            showCaptureError(.recordingFailure(underlying: error))
+        }
+    }
+
+    /// Starts a full screen recording
+    @objc func startFullScreenRecording() {
+        guard !isRecordingInProgress, !isCaptureInProgress else { return }
+
+        isRecordingInProgress = true
+
+        Task {
+            do {
+                let displays = try await CaptureManager.shared.availableDisplays()
+                guard let selectedDisplay = await displaySelector.selectDisplay(from: displays) else {
+                    isRecordingInProgress = false
+                    return
+                }
+
+                // show the frame border around the full screen
+                let frameWindowID = RecordingFrameController.shared.showFullScreen(on: selectedDisplay)
+
+                RecordingOverlayController.shared.show(on: selectedDisplay) { [weak self] in
+                    self?.stopRecording()
+                }
+
+                menuBarController?.setRecordingState(true)
+
+                var excludedIDs: [CGWindowID] = [frameWindowID]
+                if let overlayID = RecordingOverlayController.shared.currentWindowID {
+                    excludedIDs.append(overlayID)
+                }
+
+                try await VideoRecorder.shared.startFullScreenRecording(
+                    display: selectedDisplay,
+                    excludedWindowIDs: excludedIDs
+                ) { [weak self] elapsed in
+                    self?.handleRecordingElapsedTime(elapsed)
+                }
+
+            } catch {
+                isRecordingInProgress = false
+                RecordingFrameController.shared.dismiss()
+                RecordingOverlayController.shared.dismiss()
+                menuBarController?.setRecordingState(false)
+                showCaptureError(.recordingFailure(underlying: error))
+            }
+        }
+    }
+
+    /// Stops the current recording and shows the preview
+    @objc func stopRecording() {
+        guard isRecordingInProgress else { return }
+
+        #if DEBUG
+        print("Stopping recording...")
+        #endif
+
+        Task {
+            do {
+                let recording = try await VideoRecorder.shared.stopRecording()
+
+                RecordingFrameController.shared.dismiss()
+                RecordingOverlayController.shared.dismiss()
+                menuBarController?.setRecordingState(false)
+                isRecordingInProgress = false
+
+                // show the video preview window
+                VideoPreviewWindowController.shared.showPreview(for: recording) { [weak self] savedURL in
+                    self?.addRecentCapture(filePath: savedURL, recording: recording)
+                }
+
+            } catch {
+                RecordingFrameController.shared.dismiss()
+                RecordingOverlayController.shared.dismiss()
+                menuBarController?.setRecordingState(false)
+                isRecordingInProgress = false
+                showCaptureError(.recordingFailure(underlying: error))
+            }
+        }
+    }
+
+    /// Updates the recording overlay with elapsed time
+    private func handleRecordingElapsedTime(_ elapsed: TimeInterval) {
+        RecordingOverlayController.shared.updateElapsedTime(elapsed)
+    }
+
     /// Opens the settings window
     @objc func openSettings() {
         #if DEBUG
@@ -377,6 +597,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 openSettings()
             }
 
+        case .recordingFailure:
+            alert.addButton(withTitle: NSLocalizedString("error.retry.capture", comment: "Retry"))
+            alert.addButton(withTitle: NSLocalizedString("error.dismiss", comment: "Dismiss"))
+            alert.runModal()
+
         default:
             alert.addButton(withTitle: NSLocalizedString("error.ok", comment: "OK"))
             alert.runModal()
@@ -388,6 +613,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Adds a capture to recent captures store
     func addRecentCapture(filePath: URL, image: CGImage) {
         recentCapturesStore?.add(filePath: filePath, image: image)
+        menuBarController?.updateRecentCapturesMenu()
+    }
+
+    /// Adds a recording to recent captures store (uses a generic video thumbnail)
+    func addRecentCapture(filePath: URL, recording: Recording) {
+        // generate a thumbnail from the first frame of the video
+        let capture = RecentCapture(
+            filePath: filePath,
+            captureDate: recording.captureDate,
+            thumbnailData: nil
+        )
+        recentCapturesStore?.addCapture(capture)
         menuBarController?.updateRecentCapturesMenu()
     }
 }

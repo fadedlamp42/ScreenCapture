@@ -41,7 +41,8 @@ struct SettingsView: View {
                     shortcut: viewModel.fullScreenShortcut,
                     isRecording: viewModel.isRecordingFullScreenShortcut,
                     onRecord: { viewModel.startRecordingFullScreenShortcut() },
-                    onReset: { viewModel.resetFullScreenShortcut() }
+                    onReset: { viewModel.fullScreenShortcut = nil },
+                    onClear: viewModel.fullScreenShortcut != nil ? { viewModel.clearFullScreenShortcut() } : nil
                 )
 
                 ShortcutRecorder(
@@ -49,7 +50,17 @@ struct SettingsView: View {
                     shortcut: viewModel.selectionShortcut,
                     isRecording: viewModel.isRecordingSelectionShortcut,
                     onRecord: { viewModel.startRecordingSelectionShortcut() },
-                    onReset: { viewModel.resetSelectionShortcut() }
+                    onReset: { viewModel.resetSelectionShortcut() },
+                    onClear: viewModel.selectionShortcut != nil ? { viewModel.clearSelectionShortcut() } : nil
+                )
+
+                ShortcutRecorder(
+                    label: "Record Selection",
+                    shortcut: viewModel.recordingShortcut,
+                    isRecording: false,
+                    onRecord: { },
+                    onReset: { viewModel.resetRecordingShortcut() },
+                    onClear: viewModel.recordingShortcut != nil ? { viewModel.clearRecordingShortcut() } : nil
                 )
             } header: {
                 Label("Keyboard Shortcuts", systemImage: "keyboard")
@@ -337,10 +348,11 @@ private struct HEICQualitySlider: View {
 /// A control for recording keyboard shortcuts.
 private struct ShortcutRecorder: View {
     let label: String
-    let shortcut: KeyboardShortcut
+    let shortcut: KeyboardShortcut?
     let isRecording: Bool
     let onRecord: () -> Void
     let onReset: () -> Void
+    var onClear: (() -> Void)?
 
     var body: some View {
         HStack {
@@ -359,13 +371,24 @@ private struct ShortcutRecorder: View {
                 Button {
                     onRecord()
                 } label: {
-                    Text(shortcut.displayString)
+                    Text(shortcut?.displayString ?? "Not Set")
+                        .foregroundStyle(shortcut != nil ? .primary : .secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(Color.secondary.opacity(0.1))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
+            }
+
+            if shortcut != nil, let onClear = onClear {
+                Button {
+                    onClear()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Clear shortcut")
             }
 
             Button {
@@ -378,7 +401,7 @@ private struct ShortcutRecorder: View {
             .disabled(isRecording)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("\(label): \(shortcut.displayString)"))
+        .accessibilityLabel(Text("\(label): \(shortcut?.displayString ?? "Not Set")"))
     }
 }
 

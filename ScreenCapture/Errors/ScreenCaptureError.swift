@@ -29,6 +29,11 @@ enum ScreenCaptureError: LocalizedError, Sendable {
     /// Failed to encode the image to the specified format
     case exportEncodingFailed(format: ExportFormat)
 
+    // MARK: - Recording Errors
+
+    /// Video recording failed with an underlying cause
+    case recordingFailure(underlying: any Error)
+
     // MARK: - Clipboard Errors
 
     /// Failed to write the screenshot to the system clipboard
@@ -54,6 +59,8 @@ enum ScreenCaptureError: LocalizedError, Sendable {
             return String(format: NSLocalizedString("error.display.disconnected", comment: ""), displayName)
         case .captureFailure:
             return NSLocalizedString("error.capture.failed", comment: "")
+        case .recordingFailure:
+            return NSLocalizedString("error.recording.failed", comment: "Recording failed")
         case .invalidSaveLocation:
             return NSLocalizedString("error.save.location.invalid", comment: "")
         case .diskFull:
@@ -79,6 +86,8 @@ enum ScreenCaptureError: LocalizedError, Sendable {
             return NSLocalizedString("error.display.disconnected.recovery", comment: "")
         case .captureFailure:
             return NSLocalizedString("error.capture.failed.recovery", comment: "")
+        case .recordingFailure:
+            return NSLocalizedString("error.recording.failed.recovery", comment: "Try recording again. If the problem persists, check screen recording permissions.")
         case .invalidSaveLocation:
             return NSLocalizedString("error.save.location.invalid.recovery", comment: "")
         case .diskFull:
@@ -101,6 +110,11 @@ extension ScreenCaptureError {
     /// Creates a capture failure error with a sendable error description
     static func captureError(message: String) -> ScreenCaptureError {
         .captureFailure(underlying: CaptureFailureError(message: message))
+    }
+
+    /// Creates a recording failure error with a sendable error description
+    static func recordingError(message: String) -> ScreenCaptureError {
+        .recordingFailure(underlying: CaptureFailureError(message: message))
     }
 }
 

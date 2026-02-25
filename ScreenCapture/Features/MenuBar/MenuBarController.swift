@@ -75,6 +75,38 @@ final class MenuBarController {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Record Selection
+        let recordSelectionItem = NSMenuItem(
+            title: "Record Selection",
+            action: #selector(AppDelegate.startRecordingSelection),
+            keyEquivalent: "5"
+        )
+        recordSelectionItem.keyEquivalentModifierMask = [.command, .shift]
+        recordSelectionItem.target = appDelegate
+        menu.addItem(recordSelectionItem)
+
+        // Record Full Screen
+        let recordFullScreenItem = NSMenuItem(
+            title: "Record Full Screen",
+            action: #selector(AppDelegate.startFullScreenRecording),
+            keyEquivalent: ""
+        )
+        recordFullScreenItem.target = appDelegate
+        menu.addItem(recordFullScreenItem)
+
+        // Stop Recording (hidden until recording starts)
+        let stopRecordingItem = NSMenuItem(
+            title: "Stop Recording",
+            action: #selector(AppDelegate.stopRecording),
+            keyEquivalent: ""
+        )
+        stopRecordingItem.target = appDelegate
+        stopRecordingItem.isHidden = true
+        stopRecordingItem.tag = 100 // tag to find it later
+        menu.addItem(stopRecordingItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Recent Captures submenu
         let recentItem = NSMenuItem(
             title: NSLocalizedString("menu.recent.captures", comment: "Recent Captures"),
@@ -155,6 +187,31 @@ final class MenuBarController {
             )
             clearItem.target = self
             menu.addItem(clearItem)
+        }
+    }
+
+    // MARK: - Recording State
+
+    /// Updates the menu bar to reflect recording state.
+    /// Shows a red dot icon and reveals the stop item while recording.
+    func setRecordingState(_ isRecording: Bool) {
+        if let button = statusItem?.button {
+            if isRecording {
+                button.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Recording")
+                button.image?.isTemplate = false // keep it red
+            } else {
+                button.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "ScreenCapture")
+                button.image?.isTemplate = true
+            }
+        }
+
+        // show/hide the stop recording menu item
+        if let menu = statusItem?.menu {
+            for item in menu.items {
+                if item.tag == 100 {
+                    item.isHidden = !isRecording
+                }
+            }
         }
     }
 

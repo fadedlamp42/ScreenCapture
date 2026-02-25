@@ -27,6 +27,7 @@ final class AppSettings {
         static let heicQuality = prefix + "heicQuality"
         static let fullScreenShortcut = prefix + "fullScreenShortcut"
         static let selectionShortcut = prefix + "selectionShortcut"
+        static let recordingShortcut = prefix + "recordingShortcut"
         static let strokeColor = prefix + "strokeColor"
         static let strokeWidth = prefix + "strokeWidth"
         static let textSize = prefix + "textSize"
@@ -58,14 +59,19 @@ final class AppSettings {
         didSet { save(heicQuality, forKey: Keys.heicQuality) }
     }
 
-    /// Global hotkey for full screen capture
-    var fullScreenShortcut: KeyboardShortcut {
-        didSet { saveShortcut(fullScreenShortcut, forKey: Keys.fullScreenShortcut) }
+    /// Global hotkey for full screen capture (nil = unbound)
+    var fullScreenShortcut: KeyboardShortcut? {
+        didSet { saveOptionalShortcut(fullScreenShortcut, forKey: Keys.fullScreenShortcut) }
     }
 
-    /// Global hotkey for selection capture
-    var selectionShortcut: KeyboardShortcut {
-        didSet { saveShortcut(selectionShortcut, forKey: Keys.selectionShortcut) }
+    /// Global hotkey for selection capture (nil = unbound)
+    var selectionShortcut: KeyboardShortcut? {
+        didSet { saveOptionalShortcut(selectionShortcut, forKey: Keys.selectionShortcut) }
+    }
+
+    /// Global hotkey for video recording (nil = unbound)
+    var recordingShortcut: KeyboardShortcut? {
+        didSet { saveOptionalShortcut(recordingShortcut, forKey: Keys.recordingShortcut) }
     }
 
     /// Default annotation stroke color
@@ -135,11 +141,10 @@ final class AppSettings {
         // Load HEIC quality
         heicQuality = defaults.object(forKey: Keys.heicQuality) as? Double ?? 0.9
 
-        // Load shortcuts
-        fullScreenShortcut = Self.loadShortcut(forKey: Keys.fullScreenShortcut)
-            ?? KeyboardShortcut.fullScreenDefault
-        selectionShortcut = Self.loadShortcut(forKey: Keys.selectionShortcut)
-            ?? KeyboardShortcut.selectionDefault
+        // Load shortcuts (nil means unbound)
+        fullScreenShortcut = Self.loadOptionalShortcut(forKey: Keys.fullScreenShortcut, default: nil)
+        selectionShortcut = Self.loadOptionalShortcut(forKey: Keys.selectionShortcut, default: .selectionDefault)
+        recordingShortcut = Self.loadOptionalShortcut(forKey: Keys.recordingShortcut, default: .recordingDefault)
 
         // Load annotation defaults
         strokeColor = Self.loadColor(forKey: Keys.strokeColor) ?? .red
@@ -198,8 +203,9 @@ final class AppSettings {
         defaultFormat = .png
         jpegQuality = 0.9
         heicQuality = 0.9
-        fullScreenShortcut = .fullScreenDefault
+        fullScreenShortcut = nil
         selectionShortcut = .selectionDefault
+        recordingShortcut = .recordingDefault
         strokeColor = .red
         strokeWidth = 2.0
         textSize = 14.0
@@ -215,20 +221,46 @@ final class AppSettings {
         UserDefaults.standard.set(value, forKey: key)
     }
 
-    private func saveShortcut(_ shortcut: KeyboardShortcut, forKey key: String) {
-        let data: [String: UInt32] = [
-            "keyCode": shortcut.keyCode,
-            "modifiers": shortcut.modifiers
-        ]
-        UserDefaults.standard.set(data, forKey: key)
+    /// saves a shortcut to UserDefaults. nil clears the binding
+    /// by storing a sentinel so we can distinguish "never set" from "cleared".
+    private func saveOptionalShortcut(_ shortcut: KeyboardShortcut?, forKey key: String) {
+        if let shortcut = shortcut {
+            let data: [String: UInt32] = [
+                "keyCode": shortcut.keyCode,
+                "modifiers": shortcut.modifiers
+            ]
+            UserDefaults.standard.set(data, forKey: key)
+        } else {
+            // store a sentinel dict so we know this was explicitly cleared
+            UserDefaults.standard.set(["cleared": true], forKey: key)
+        }
     }
 
-    private static func loadShortcut(forKey key: String) -> KeyboardShortcut? {
-        guard let data = UserDefaults.standard.dictionary(forKey: key) as? [String: UInt32],
-              let keyCode = data["keyCode"],
-              let modifiers = data["modifiers"] else {
+    /// loads an optional shortcut from UserDefaults.
+    /// returns `default` if the key was never set, nil if explicitly cleared.
+    private static func loadOptionalShortcut(
+        forKey key: String,
+        default defaultShortcut: KeyboardShortcut?
+    ) -> KeyboardShortcut? {
+        let defaults = UserDefaults.standard
+
+        // nothing stored at all -> use the default
+        guard let stored = defaults.dictionary(forKey: key) else {
+            return defaultShortcut
+        }
+
+        // explicitly cleared
+        if stored["cleared"] != nil {
             return nil
         }
+
+        // normal shortcut data
+        guard let data = stored as? [String: UInt32],
+              let keyCode = data["keyCode"],
+              let modifiers = data["modifiers"] else {
+            return defaultShortcut
+        }
+
         return KeyboardShortcut(keyCode: keyCode, modifiers: modifiers)
     }
 

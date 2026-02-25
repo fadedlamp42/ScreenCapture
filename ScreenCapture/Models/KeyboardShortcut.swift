@@ -25,16 +25,16 @@ struct KeyboardShortcut: Equatable, Codable, Sendable {
 
     // MARK: - Default Shortcuts
 
-    /// Default full screen capture shortcut: Command + Shift + 3
-    static let fullScreenDefault = KeyboardShortcut(
-        keyCode: UInt32(kVK_ANSI_3),
+    /// Default selection capture shortcut: Command + Shift + X
+    static let selectionDefault = KeyboardShortcut(
+        keyCode: UInt32(kVK_ANSI_X),
         modifiers: UInt32(cmdKey | shiftKey)
     )
 
-    /// Default selection capture shortcut: Command + Shift + 4
-    static let selectionDefault = KeyboardShortcut(
-        keyCode: UInt32(kVK_ANSI_4),
-        modifiers: UInt32(cmdKey | shiftKey)
+    /// Default video recording shortcut: Command + Shift + Option + X
+    static let recordingDefault = KeyboardShortcut(
+        keyCode: UInt32(kVK_ANSI_X),
+        modifiers: UInt32(cmdKey | shiftKey | optionKey)
     )
 
     // MARK: - Validation

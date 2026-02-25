@@ -62,6 +62,18 @@ final class RecentCapturesStore: ObservableObject {
         saveCaptures()
     }
 
+    /// Adds a pre-built RecentCapture to the recent list.
+    /// Used for recordings where a thumbnail may not be available.
+    func addCapture(_ capture: RecentCapture) {
+        captures.insert(capture, at: 0)
+
+        if captures.count > Self.maxCaptures {
+            captures = Array(captures.prefix(Self.maxCaptures))
+        }
+
+        saveCaptures()
+    }
+
     /// Removes a capture from the recent list.
     /// - Parameter capture: The capture to remove
     func remove(capture: RecentCapture) {

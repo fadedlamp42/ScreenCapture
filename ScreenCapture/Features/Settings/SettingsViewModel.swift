@@ -82,8 +82,8 @@ final class SettingsViewModel {
         set { heicQuality = newValue / 100 }
     }
 
-    /// Full screen capture shortcut
-    var fullScreenShortcut: KeyboardShortcut {
+    /// Full screen capture shortcut (nil = unbound)
+    var fullScreenShortcut: KeyboardShortcut? {
         get { settings.fullScreenShortcut }
         set {
             settings.fullScreenShortcut = newValue
@@ -91,11 +91,20 @@ final class SettingsViewModel {
         }
     }
 
-    /// Selection capture shortcut
-    var selectionShortcut: KeyboardShortcut {
+    /// Selection capture shortcut (nil = unbound)
+    var selectionShortcut: KeyboardShortcut? {
         get { settings.selectionShortcut }
         set {
             settings.selectionShortcut = newValue
+            appDelegate?.updateHotkeys()
+        }
+    }
+
+    /// Recording shortcut (nil = unbound)
+    var recordingShortcut: KeyboardShortcut? {
+        get { settings.recordingShortcut }
+        set {
+            settings.recordingShortcut = newValue
             appDelegate?.updateHotkeys()
         }
     }
@@ -339,14 +348,29 @@ final class SettingsViewModel {
         return true
     }
 
-    /// Resets a shortcut to its default
-    func resetFullScreenShortcut() {
-        fullScreenShortcut = .fullScreenDefault
+    /// Clears the full screen shortcut (unbinds it)
+    func clearFullScreenShortcut() {
+        fullScreenShortcut = nil
     }
 
     /// Resets selection shortcut to default
     func resetSelectionShortcut() {
         selectionShortcut = .selectionDefault
+    }
+
+    /// Resets recording shortcut to default
+    func resetRecordingShortcut() {
+        recordingShortcut = .recordingDefault
+    }
+
+    /// Clears a shortcut (unbinds it)
+    func clearSelectionShortcut() {
+        selectionShortcut = nil
+    }
+
+    /// Clears the recording shortcut
+    func clearRecordingShortcut() {
+        recordingShortcut = nil
     }
 
     /// Resets all settings to defaults
