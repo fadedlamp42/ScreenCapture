@@ -65,12 +65,22 @@ MIT License
 ## my opencode sessions
 
 `ses_376a9853bffeRs3RGWRCCQuDTK` - initial version fix, plans for next features
+`ses_36d47b340ffeJopAkly82xurve` - audio capture, section muting, export pipeline
 
 ## todo
 
 ## ongoing
 
 ### active
+
+- [ ] add audio to screen recordings — branch `feat/audio-section-muting`, session `ses_36d47b340ffeJopAkly82xurve`
+  - [x] milestone 1+2: audio capture + mute on export (committed to main)
+  - [x] milestone 3: section muting (committed to branch, untested)
+    - [ ] test: record with system audio playing, verify playback has sound
+    - [ ] test: add a mute region via "+", drag red handles, save, verify silence in that section
+    - [ ] test: full mute toggle (speaker icon), save, verify completely silent
+  - [ ] milestone 4: voiceover recording + mixing
+  - [ ] milestone 5: timestamped text annotations burned into video
 
 ### passive
 
