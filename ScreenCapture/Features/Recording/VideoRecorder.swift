@@ -410,11 +410,19 @@ actor VideoRecorder {
 /// Handles SCStream frame delivery and writes directly to AVAssetWriterInput.
 /// Owns the writer session start and frame append to avoid crossing actor boundaries
 /// with non-Sendable CMSampleBuffer objects.
+///
+/// Audio buffers that arrive before the first video frame are held in memory
+/// and flushed once the session starts, preventing the audible gap/rebuffer
+/// that occurs when SCStream's audio pipeline initializes faster than video.
 private final class StreamOutputDelegate: NSObject, SCStreamOutput, @unchecked Sendable {
     private let assetWriter: AVAssetWriter
     private let videoInput: AVAssetWriterInput
     private let audioInput: AVAssetWriterInput?
     private var hasStartedSession = false
+
+    /// audio buffers received before the first video frame.
+    /// flushed once the session starts, then cleared.
+    private var earlyAudioBuffers: [CMSampleBuffer] = []
 
     init(
         assetWriter: AVAssetWriter,
@@ -434,15 +442,36 @@ private final class StreamOutputDelegate: NSObject, SCStreamOutput, @unchecked S
     ) {
         guard sampleBuffer.isValid else { return }
 
-        // start the asset writer session on the first video frame's timestamp
-        if !hasStartedSession, type == .screen {
-            guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
-            let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            assetWriter.startSession(atSourceTime: timestamp)
-            hasStartedSession = true
-        }
+        // before the session starts, buffer audio and wait for the first video frame
+        if !hasStartedSession {
+            if type == .audio {
+                earlyAudioBuffers.append(sampleBuffer)
+                return
+            }
 
-        guard hasStartedSession else { return }
+            // only a valid video frame can start the session
+            guard type == .screen,
+                  CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
+
+            // anchor the session to the earliest available timestamp.
+            // if audio arrived before video, use the first audio buffer's
+            // timestamp so those samples fall within the session window.
+            let sessionStart: CMTime
+            if let firstAudio = earlyAudioBuffers.first {
+                sessionStart = CMSampleBufferGetPresentationTimeStamp(firstAudio)
+            } else {
+                sessionStart = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            }
+
+            assetWriter.startSession(atSourceTime: sessionStart)
+            hasStartedSession = true
+
+            // flush all buffered audio — timestamps are guaranteed valid
+            // since the session started at or before the earliest one
+            flushEarlyAudio()
+
+            // fall through to append this video frame below
+        }
 
         if type == .screen {
             guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil,
@@ -455,5 +484,22 @@ private final class StreamOutputDelegate: NSObject, SCStreamOutput, @unchecked S
                   audioInput.isReadyForMoreMediaData else { return }
             audioInput.append(sampleBuffer)
         }
+    }
+
+    /// writes all early audio buffers to the audio input.
+    /// called once immediately after session start, when the writer's
+    /// internal buffers are empty and ready for data.
+    private func flushEarlyAudio() {
+        guard let audioInput = audioInput else {
+            earlyAudioBuffers.removeAll()
+            return
+        }
+
+        for buffer in earlyAudioBuffers {
+            if audioInput.isReadyForMoreMediaData {
+                audioInput.append(buffer)
+            }
+        }
+        earlyAudioBuffers.removeAll()
     }
 }
