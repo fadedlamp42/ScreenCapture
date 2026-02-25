@@ -160,6 +160,9 @@ final class VideoPreviewViewModel {
     var isTrimming = false
     var statusMessage: String?
 
+    /// whether audio should be stripped on export
+    var isMuted: Bool = false
+
     /// trim range (0.0 to 1.0, normalized to duration)
     var trimStartNormalized: Double = 0.0
     var trimEndNormalized: Double = 1.0
@@ -224,7 +227,7 @@ final class VideoPreviewViewModel {
                 }
 
                 statusMessage = "saving..."
-                let savedURL = try await exporter.save(recordingToSave)
+                let savedURL = try await exporter.save(recordingToSave, muteAudio: isMuted)
                 self.recording = recordingToSave.saved(to: savedURL)
 
                 statusMessage = "saved"
@@ -258,7 +261,7 @@ final class VideoPreviewViewModel {
 
                 // saves to output directory first, then puts that URL on clipboard
                 statusMessage = "saving & copying..."
-                let savedURL = try await exporter.copyToClipboard(recordingToCopy)
+                let savedURL = try await exporter.copyToClipboard(recordingToCopy, muteAudio: isMuted)
                 self.recording = recordingToCopy.saved(to: savedURL)
                 onSave?(savedURL)
 
@@ -376,6 +379,18 @@ struct VideoPreviewContentView: View {
             }
 
             Spacer()
+
+            // mute toggle (only shown when recording has audio)
+            if viewModel.recording.hasAudio {
+                Button(action: { viewModel.isMuted.toggle() }) {
+                    Label(
+                        viewModel.isMuted ? "Unmute" : "Mute",
+                        systemImage: viewModel.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+                    )
+                }
+                .help(viewModel.isMuted ? "Audio will be stripped on export" : "Audio will be included on export")
+                .buttonStyle(.bordered)
+            }
 
             // right: action buttons
             HStack(spacing: 8) {

@@ -10,7 +10,7 @@ struct VideoExporter: Sendable {
     // MARK: - Save
 
     /// saves a recording to the user's configured save location
-    func save(_ recording: Recording) async throws -> URL {
+    func save(_ recording: Recording, muteAudio: Bool = false) async throws -> URL {
         let settings = await MainActor.run { AppSettings.shared }
         let saveLocation = await MainActor.run { settings.saveLocation }
         let destinationURL = generateFileURL(in: saveLocation)
@@ -21,8 +21,13 @@ struct VideoExporter: Sendable {
             throw ScreenCaptureError.invalidSaveLocation(directory)
         }
 
-        // move from temp to final location
-        try FileManager.default.copyItem(at: recording.tempFileURL, to: destinationURL)
+        if muteAudio && recording.hasAudio {
+            // re-export with audio stripped
+            try await exportStrippingAudio(from: recording.tempFileURL, to: destinationURL)
+        } else {
+            // straight copy — preserves audio as-is
+            try FileManager.default.copyItem(at: recording.tempFileURL, to: destinationURL)
+        }
 
         #if DEBUG
         print("recording saved: \(destinationURL.lastPathComponent)")
@@ -32,8 +37,12 @@ struct VideoExporter: Sendable {
     }
 
     /// saves a recording to a specific URL
-    func save(_ recording: Recording, to url: URL) async throws -> URL {
-        try FileManager.default.copyItem(at: recording.tempFileURL, to: url)
+    func save(_ recording: Recording, to url: URL, muteAudio: Bool = false) async throws -> URL {
+        if muteAudio && recording.hasAudio {
+            try await exportStrippingAudio(from: recording.tempFileURL, to: url)
+        } else {
+            try FileManager.default.copyItem(at: recording.tempFileURL, to: url)
+        }
         return url
     }
 
@@ -45,9 +54,9 @@ struct VideoExporter: Sendable {
     ///   - temp files get cleaned up when the preview closes
     ///   - pasting an empty/deleted file results in 0B uploads
     ///   - the saved file gets a nice "Recording YYYY-MM-DD at HH.mm.ss.mp4" name
-    func copyToClipboard(_ recording: Recording) async throws -> URL {
+    func copyToClipboard(_ recording: Recording, muteAudio: Bool = false) async throws -> URL {
         // save to the output directory so the file persists after preview closes
-        let savedURL = try await save(recording)
+        let savedURL = try await save(recording, muteAudio: muteAudio)
 
         await MainActor.run {
             let pasteboard = NSPasteboard.general
@@ -112,6 +121,51 @@ struct VideoExporter: Sendable {
         #endif
 
         return trimmedRecording
+    }
+
+    // MARK: - Audio Stripping
+
+    /// re-exports a video file with only the video track, dropping all audio.
+    /// uses AVMutableComposition for a fast passthrough re-mux (no re-encode).
+    private func exportStrippingAudio(from sourceURL: URL, to destinationURL: URL) async throws {
+        let asset = AVURLAsset(url: sourceURL)
+        let composition = AVMutableComposition()
+
+        // load video tracks from the source asset
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let sourceVideoTrack = videoTracks.first else {
+            throw ScreenCaptureError.recordingError(message: "no video track found in recording")
+        }
+
+        // add only the video track to the composition — audio is intentionally omitted
+        guard let compositionVideoTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw ScreenCaptureError.recordingError(message: "failed to create composition track")
+        }
+
+        let duration = try await asset.load(.duration)
+        let timeRange = CMTimeRange(start: .zero, duration: duration)
+        try compositionVideoTrack.insertTimeRange(timeRange, of: sourceVideoTrack, at: .zero)
+
+        // export with passthrough (no re-encode)
+        guard let exportSession = AVAssetExportSession(
+            asset: composition,
+            presetName: AVAssetExportPresetPassthrough
+        ) else {
+            throw ScreenCaptureError.recordingError(message: "failed to create export session for muting")
+        }
+
+        exportSession.outputURL = destinationURL
+        exportSession.outputFileType = .mp4
+
+        await exportSession.export()
+
+        guard exportSession.status == .completed else {
+            let errorMessage = exportSession.error?.localizedDescription ?? "unknown mute export error"
+            throw ScreenCaptureError.recordingError(message: "mute export failed: \(errorMessage)")
+        }
     }
 
     // MARK: - Filename Generation

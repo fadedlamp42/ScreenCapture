@@ -35,6 +35,7 @@ final class AppSettings {
         static let recentCaptures = prefix + "recentCaptures"
         static let ocrRecognitionLevel = prefix + "ocrRecognitionLevel"
         static let ocrLanguage = prefix + "ocrLanguage"
+        static let recordAudio = prefix + "recordAudio"
     }
 
     // MARK: - Properties
@@ -109,6 +110,11 @@ final class AppSettings {
         didSet { save(ocrLanguage, forKey: Keys.ocrLanguage) }
     }
 
+    /// whether to capture audio (system + mic) during screen recording
+    var recordAudio: Bool {
+        didSet { save(recordAudio, forKey: Keys.recordAudio) }
+    }
+
     // MARK: - Initialization
 
     private init() {
@@ -161,6 +167,9 @@ final class AppSettings {
         }
         ocrLanguage = defaults.string(forKey: Keys.ocrLanguage) ?? "en-US"
 
+        // Load audio recording preference
+        recordAudio = defaults.object(forKey: Keys.recordAudio) as? Bool ?? true
+
         // Load recent captures
         recentCaptures = Self.loadRecentCaptures()
 
@@ -212,6 +221,7 @@ final class AppSettings {
         rectangleFilled = false
         ocrRecognitionLevel = .accurate
         ocrLanguage = "en-US"
+        recordAudio = true
         recentCaptures = []
     }
 

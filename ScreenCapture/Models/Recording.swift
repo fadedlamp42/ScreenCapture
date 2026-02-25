@@ -22,6 +22,9 @@ struct Recording: Identifiable, Sendable {
     /// total duration in seconds
     let duration: TimeInterval
 
+    /// whether this recording contains an audio track
+    let hasAudio: Bool
+
     /// saved file location (nil until user saves)
     var filePath: URL?
 
@@ -34,6 +37,7 @@ struct Recording: Identifiable, Sendable {
         sourceDisplay: DisplayInfo,
         sourceRegion: CGRect? = nil,
         duration: TimeInterval,
+        hasAudio: Bool = false,
         filePath: URL? = nil
     ) {
         self.id = id
@@ -42,6 +46,7 @@ struct Recording: Identifiable, Sendable {
         self.sourceDisplay = sourceDisplay
         self.sourceRegion = sourceRegion
         self.duration = duration
+        self.hasAudio = hasAudio
         self.filePath = filePath
     }
 

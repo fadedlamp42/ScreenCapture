@@ -444,7 +444,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try await VideoRecorder.shared.startRegionRecording(
                 region: rect,
                 display: display,
-                excludedWindowIDs: excludedIDs
+                excludedWindowIDs: excludedIDs,
+                recordAudio: settings.recordAudio
             ) { [weak self] elapsed in
                 // update the overlay timer on every tick
                 self?.handleRecordingElapsedTime(elapsed)
@@ -489,7 +490,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 try await VideoRecorder.shared.startFullScreenRecording(
                     display: selectedDisplay,
-                    excludedWindowIDs: excludedIDs
+                    excludedWindowIDs: excludedIDs,
+                    recordAudio: settings.recordAudio
                 ) { [weak self] elapsed in
                     self?.handleRecordingElapsedTime(elapsed)
                 }

@@ -38,6 +38,12 @@ actor VideoRecorder {
     /// video input feeding sample buffers to the writer
     private var videoInput: AVAssetWriterInput?
 
+    /// audio input feeding sample buffers to the writer (nil when audio disabled)
+    private var audioInput: AVAssetWriterInput?
+
+    /// whether the current recording has audio
+    private var recordingHasAudio = false
+
     /// when recording started (for elapsed time)
     private var recordingStartTime: Date?
 
@@ -69,12 +75,14 @@ actor VideoRecorder {
     func startFullScreenRecording(
         display: DisplayInfo,
         excludedWindowIDs: [CGWindowID] = [],
+        recordAudio: Bool = true,
         onElapsedTime: @escaping @MainActor @Sendable (TimeInterval) -> Void
     ) async throws {
         try await startRecording(
             display: display,
             region: nil,
             excludedWindowIDs: excludedWindowIDs,
+            recordAudio: recordAudio,
             onElapsedTime: onElapsedTime
         )
     }
@@ -84,12 +92,14 @@ actor VideoRecorder {
         region: CGRect,
         display: DisplayInfo,
         excludedWindowIDs: [CGWindowID] = [],
+        recordAudio: Bool = true,
         onElapsedTime: @escaping @MainActor @Sendable (TimeInterval) -> Void
     ) async throws {
         try await startRecording(
             display: display,
             region: region,
             excludedWindowIDs: excludedWindowIDs,
+            recordAudio: recordAudio,
             onElapsedTime: onElapsedTime
         )
     }
@@ -119,6 +129,7 @@ actor VideoRecorder {
         }
 
         videoInput.markAsFinished()
+        audioInput?.markAsFinished()
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             assetWriter.finishWriting {
@@ -127,6 +138,7 @@ actor VideoRecorder {
         }
 
         let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        let hasAudio = recordingHasAudio
 
         guard let tempURL = tempFileURL,
               let display = sourceDisplay else {
@@ -138,12 +150,15 @@ actor VideoRecorder {
             captureDate: recordingStartTime ?? Date(),
             sourceDisplay: display,
             sourceRegion: sourceRegion,
-            duration: duration
+            duration: duration,
+            hasAudio: hasAudio
         )
 
         // clean up state
         self.assetWriter = nil
         self.videoInput = nil
+        self.audioInput = nil
+        self.recordingHasAudio = false
         self.tempFileURL = nil
         self.sourceDisplay = nil
         self.sourceRegion = nil
@@ -175,6 +190,7 @@ actor VideoRecorder {
         display: DisplayInfo,
         region: CGRect?,
         excludedWindowIDs: [CGWindowID] = [],
+        recordAudio: Bool = true,
         onElapsedTime: @escaping @MainActor @Sendable (TimeInterval) -> Void
     ) async throws {
         guard state == .idle else {
@@ -199,7 +215,7 @@ actor VideoRecorder {
 
             // configure the stream
             let filter = SCContentFilter(display: scDisplay, excludingWindows: excludedWindows)
-            let config = createStreamConfiguration(for: display, region: region)
+            let config = createStreamConfiguration(for: display, region: region, recordAudio: recordAudio)
 
             // set up the temp file and asset writer
             let tempURL = FileManager.default.temporaryDirectory
@@ -232,9 +248,29 @@ actor VideoRecorder {
             input.expectsMediaDataInRealTime = true
             writer.add(input)
 
+            // set up audio input when audio capture is enabled
+            var audioWriterInput: AVAssetWriterInput?
+            if recordAudio {
+                let audioSettings: [String: Any] = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 48000,
+                    AVNumberOfChannelsKey: 2,
+                    AVEncoderBitRateKey: 128_000,
+                ]
+                let aInput = AVAssetWriterInput(
+                    mediaType: .audio,
+                    outputSettings: audioSettings
+                )
+                aInput.expectsMediaDataInRealTime = true
+                writer.add(aInput)
+                audioWriterInput = aInput
+            }
+
             // store everything
             self.assetWriter = writer
             self.videoInput = input
+            self.audioInput = audioWriterInput
+            self.recordingHasAudio = recordAudio
             self.tempFileURL = tempURL
             self.sourceDisplay = display
             self.sourceRegion = region
@@ -242,12 +278,21 @@ actor VideoRecorder {
             // create the output delegate that writes frames directly to the
             // AVAssetWriterInput on the handler queue - no actor hop needed,
             // which avoids CMSampleBuffer sendability issues and reduces latency.
-            let delegate = StreamOutputDelegate(assetWriter: writer, videoInput: input)
+            let delegate = StreamOutputDelegate(
+                assetWriter: writer,
+                videoInput: input,
+                audioInput: audioWriterInput
+            )
             self.outputDelegate = delegate
 
             // create and start the stream
             let scStream = SCStream(filter: filter, configuration: config, delegate: nil)
             try scStream.addStreamOutput(delegate, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
+
+            // register audio output when enabled
+            if recordAudio {
+                try scStream.addStreamOutput(delegate, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
+            }
 
             self.stream = scStream
 
@@ -275,6 +320,8 @@ actor VideoRecorder {
             // clean up on failure
             self.assetWriter = nil
             self.videoInput = nil
+            self.audioInput = nil
+            self.recordingHasAudio = false
             self.tempFileURL = nil
             self.sourceDisplay = nil
             self.sourceRegion = nil
@@ -288,7 +335,8 @@ actor VideoRecorder {
     /// creates an SCStreamConfiguration for 60fps video capture
     private func createStreamConfiguration(
         for display: DisplayInfo,
-        region: CGRect?
+        region: CGRect?,
+        recordAudio: Bool = true
     ) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
 
@@ -313,6 +361,13 @@ actor VideoRecorder {
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = true
         config.colorSpaceName = CGColorSpace.sRGB
+
+        // audio capture via ScreenCaptureKit's built-in system audio support
+        if recordAudio {
+            config.capturesAudio = true
+            config.sampleRate = 48000
+            config.channelCount = 2
+        }
 
         return config
     }
@@ -358,11 +413,17 @@ actor VideoRecorder {
 private final class StreamOutputDelegate: NSObject, SCStreamOutput, @unchecked Sendable {
     private let assetWriter: AVAssetWriter
     private let videoInput: AVAssetWriterInput
+    private let audioInput: AVAssetWriterInput?
     private var hasStartedSession = false
 
-    init(assetWriter: AVAssetWriter, videoInput: AVAssetWriterInput) {
+    init(
+        assetWriter: AVAssetWriter,
+        videoInput: AVAssetWriterInput,
+        audioInput: AVAssetWriterInput? = nil
+    ) {
         self.assetWriter = assetWriter
         self.videoInput = videoInput
+        self.audioInput = audioInput
         super.init()
     }
 
@@ -371,23 +432,28 @@ private final class StreamOutputDelegate: NSObject, SCStreamOutput, @unchecked S
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
-        guard type == .screen else { return }
+        guard sampleBuffer.isValid else { return }
 
-        // only process valid video frames
-        guard sampleBuffer.isValid,
-              CMSampleBufferGetImageBuffer(sampleBuffer) != nil else {
-            return
-        }
-
-        guard videoInput.isReadyForMoreMediaData else { return }
-
-        // start the asset writer session on the first frame's timestamp
-        if !hasStartedSession {
+        // start the asset writer session on the first video frame's timestamp
+        if !hasStartedSession, type == .screen {
+            guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
             let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             assetWriter.startSession(atSourceTime: timestamp)
             hasStartedSession = true
         }
 
-        videoInput.append(sampleBuffer)
+        guard hasStartedSession else { return }
+
+        if type == .screen {
+            guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil,
+                  videoInput.isReadyForMoreMediaData else { return }
+            videoInput.append(sampleBuffer)
+        }
+
+        if type == .audio {
+            guard let audioInput = audioInput,
+                  audioInput.isReadyForMoreMediaData else { return }
+            audioInput.append(sampleBuffer)
+        }
     }
 }
