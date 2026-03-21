@@ -69,6 +69,8 @@ MIT License
 
 ## todo
 
+- [ ] optional freeze frame (so screen is frozen upon hotkey to capture ephemeral events like hovers)
+
 ## ongoing
 
 ### active
