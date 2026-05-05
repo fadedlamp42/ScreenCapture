@@ -1,4 +1,4 @@
-See `ses_3740246dfffenkdilGlPRD72mi` for stash
+See `ses_3740246dfffenkdilGlPRD72mi` for stash, `second-mac` branch
 
 # ScreenCapture
 
