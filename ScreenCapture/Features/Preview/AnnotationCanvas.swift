@@ -208,7 +208,8 @@ struct AnnotationCanvas: View {
         context.fill(arrowHeadPath, with: .color(color))
     }
 
-    /// Draws a text annotation
+    /// Draws a text annotation using NSAttributedString for consistent rendering with NSTextView editor.
+    /// Supports optional containerWidth for text wrapping.
     private func drawText(
         _ annotation: TextAnnotation,
         in context: inout GraphicsContext,
@@ -218,18 +219,50 @@ struct AnnotationCanvas: View {
 
         let scaledPoint = scalePoint(annotation.position)
         let scaledFontSize = annotation.style.fontSize * scale
+        let nsFont: NSFont = annotation.style.fontName == ".AppleSystemUIFont"
+            ? .systemFont(ofSize: scaledFontSize)
+            : NSFont(name: annotation.style.fontName, size: scaledFontSize) ?? .systemFont(ofSize: scaledFontSize)
 
-        let text = Text(annotation.content)
-            .font(annotation.style.fontName == ".AppleSystemUIFont"
-                  ? .system(size: scaledFontSize)
-                  : .custom(annotation.style.fontName, size: scaledFontSize))
-            .foregroundColor(annotation.style.color.color)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: nsFont,
+            .foregroundColor: NSColor(annotation.style.color.color)
+        ]
+        let attrString = NSAttributedString(string: annotation.content, attributes: attrs)
 
-        context.draw(
-            context.resolve(text),
-            at: scaledPoint,
-            anchor: .topLeading
+        let maxWidth: CGFloat = annotation.containerWidth.map { $0 * scale } ?? CGFloat.greatestFiniteMagnitude
+        let boundingRect = attrString.boundingRect(
+            with: NSSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
+
+        let imageWidth = Int(ceil(boundingRect.width)) + 1
+        let imageHeight = Int(ceil(boundingRect.height)) + 1
+        guard imageWidth > 0, imageHeight > 0 else { return }
+
+        // render text into a CGImage via NSGraphicsContext for exact NSTextView-matching output
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let bitmapContext = CGContext(
+            data: nil, width: imageWidth, height: imageHeight,
+            bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return }
+
+        let nsContext = NSGraphicsContext(cgContext: bitmapContext, flipped: true)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = nsContext
+        attrString.draw(
+            with: NSRect(x: 0, y: 0, width: imageWidth, height: imageHeight),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        NSGraphicsContext.restoreGraphicsState()
+
+        if let cgImage = bitmapContext.makeImage() {
+            context.draw(
+                context.resolve(Image(decorative: cgImage, scale: 1.0)),
+                at: scaledPoint,
+                anchor: .topLeading
+            )
+        }
     }
 
     /// Draws a selection indicator around an annotation

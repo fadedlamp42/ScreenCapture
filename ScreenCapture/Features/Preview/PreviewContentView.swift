@@ -18,6 +18,9 @@ struct PreviewContentView: View {
     @State private var lastTapTime: Date?
     @State private var lastTapPosition: CGPoint?
 
+    /// Resize handle drag start width (in screen coords)
+    @State private var resizeStartWidth: CGFloat?
+
     /// Environment variable for Reduce Motion preference
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -118,15 +121,6 @@ struct PreviewContentView: View {
                                 height: displayInfo.displaySize.height
                             )
 
-                            // Text input field overlay (when text tool is active)
-                            if viewModel.isWaitingForTextInput,
-                               let inputPosition = viewModel.textInputPosition {
-                                textInputField(
-                                    at: inputPosition,
-                                    scale: displayInfo.scale
-                                )
-                            }
-
                             // Drawing gesture overlay (only for drawing tools, not select)
                             if let tool = viewModel.selectedTool, tool.isDrawingTool {
                                 drawingGestureOverlay(
@@ -147,6 +141,16 @@ struct PreviewContentView: View {
                             if viewModel.isCropMode {
                                 cropOverlay(
                                     displaySize: displayInfo.displaySize,
+                                    scale: displayInfo.scale
+                                )
+                            }
+
+                            // Text input field sits above gesture overlays so its
+                            // resize handle can receive drag events
+                            if viewModel.isWaitingForTextInput,
+                               let inputPosition = viewModel.textInputPosition {
+                                textInputField(
+                                    at: inputPosition,
                                     scale: displayInfo.scale
                                 )
                             }
@@ -366,16 +370,48 @@ struct PreviewContentView: View {
         let fontSize = viewModel.textInputFontSize * scale
         let nsFont = NSFont.systemFont(ofSize: fontSize)
         let nsColor = NSColor(AppSettings.shared.strokeColor.color)
+        let scaledContainerWidth = viewModel.textInputContainerWidth.map { $0 * scale }
 
-        return InlineTextEditor(
-            text: $viewModel.textInputContent,
-            font: nsFont,
-            textColor: nsColor,
-            onEscape: {
-                viewModel.commitTextInput()
-            }
-        )
-        .frame(minWidth: 100, maxWidth: 300, alignment: .topLeading)
+        return HStack(alignment: .top, spacing: 0) {
+            InlineTextEditor(
+                text: $viewModel.textInputContent,
+                font: nsFont,
+                textColor: nsColor,
+                containerWidth: scaledContainerWidth,
+                onEscape: {
+                    viewModel.commitTextInput()
+                }
+            )
+            .frame(
+                minWidth: scaledContainerWidth ?? 100,
+                maxWidth: scaledContainerWidth ?? 300,
+                alignment: .topLeading
+            )
+
+            // resize handle on right edge
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.4))
+                .frame(width: 4)
+                .contentShape(Rectangle().inset(by: -4))
+                .cursor(.resizeLeftRight)
+                .gesture(
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { value in
+                            if resizeStartWidth == nil {
+                                // capture current width at drag start
+                                resizeStartWidth = scaledContainerWidth
+                                    ?? max(100, CGFloat(viewModel.textInputContent.count) * fontSize * 0.6)
+                            }
+                            if let startWidth = resizeStartWidth {
+                                let newScaledWidth = max(60, startWidth + value.translation.width)
+                                viewModel.textInputContainerWidth = newScaledWidth / scale
+                            }
+                        }
+                        .onEnded { _ in
+                            resizeStartWidth = nil
+                        }
+                )
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 2)
                 .stroke(Color.accentColor.opacity(0.4), style: SwiftUI.StrokeStyle(lineWidth: 1, dash: [3, 2]))
@@ -1033,6 +1069,8 @@ private struct InlineTextEditor: NSViewRepresentable {
     @Binding var text: String
     var font: NSFont
     var textColor: NSColor
+    /// fixed container width in screen coords (nil = dynamic auto-size)
+    var containerWidth: CGFloat?
     var onEscape: () -> Void
 
     func makeNSView(context: Context) -> InlineNSTextView {
@@ -1088,15 +1126,16 @@ private struct InlineTextEditor: NSViewRepresentable {
         guard let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return nil }
 
-        // use proposed width so the text wraps at the frame boundary
-        let proposedWidth = proposal.width ?? 200
-        textContainer.containerSize = NSSize(width: proposedWidth, height: CGFloat.greatestFiniteMagnitude)
+        // fixed width: use containerWidth; dynamic: use proposed width
+        let layoutWidth = containerWidth ?? (proposal.width ?? 200)
+        textContainer.containerSize = NSSize(width: layoutWidth, height: CGFloat.greatestFiniteMagnitude)
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         let lineHeight = textView.font?.pointSize ?? 14
 
+        let resultWidth = containerWidth ?? max(usedRect.width + 1, 100)
         return CGSize(
-            width: max(usedRect.width + 1, 100),
+            width: resultWidth,
             height: max(usedRect.height + 2, lineHeight * 1.3)
         )
     }

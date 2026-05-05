@@ -172,11 +172,15 @@ struct TextAnnotation: Identifiable, Equatable, Sendable {
     /// Font, size, and color
     var style: TextStyle
 
-    init(id: UUID = UUID(), position: CGPoint, content: String, style: TextStyle = .default) {
+    /// Text container width in image coordinates (nil = dynamic/auto-size, non-nil = fixed wrap width)
+    var containerWidth: CGFloat?
+
+    init(id: UUID = UUID(), position: CGPoint, content: String, style: TextStyle = .default, containerWidth: CGFloat? = nil) {
         self.id = id
         self.position = position
         self.content = content
         self.style = style
+        self.containerWidth = containerWidth
     }
 
     /// Whether this annotation has non-empty content
@@ -184,14 +188,28 @@ struct TextAnnotation: Identifiable, Equatable, Sendable {
         !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Estimated bounds of the text annotation based on font size and content
+    /// Estimated bounds of the text annotation based on font size, content, and container width
     var bounds: CGRect {
-        // Estimate text size based on font size and character count
-        // Average character width is approximately 0.6 × font size for most fonts
-        let averageCharWidth = style.fontSize * 0.6
-        let estimatedWidth = max(CGFloat(content.count) * averageCharWidth, style.fontSize * 2)
-        // Height is approximately 1.2 × font size (line height)
-        let estimatedHeight = style.fontSize * 1.3
+        let lineHeight = style.fontSize * 1.3
+        let charWidth = style.fontSize * 0.6
+        let lines = content.components(separatedBy: "\n")
+
+        if let containerWidth = containerWidth {
+            // fixed width: estimate wrapped line count
+            let charsPerLine = max(1, Int(containerWidth / charWidth))
+            let wrappedLineCount = lines.reduce(0) { total, line in
+                total + max(1, Int(ceil(Double(max(1, line.count)) / Double(charsPerLine))))
+            }
+            return CGRect(
+                origin: position,
+                size: CGSize(width: containerWidth, height: CGFloat(wrappedLineCount) * lineHeight)
+            )
+        }
+
+        // dynamic: estimate from content
+        let maxLineWidth = lines.map { CGFloat(max(1, $0.count)) * charWidth }.max() ?? charWidth
+        let estimatedWidth = max(maxLineWidth, style.fontSize * 2)
+        let estimatedHeight = max(CGFloat(lines.count) * lineHeight, lineHeight)
 
         return CGRect(
             origin: position,

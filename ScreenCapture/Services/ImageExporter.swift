@@ -310,7 +310,8 @@ struct ImageExporter: Sendable {
         context.fillPath()
     }
 
-    /// Renders a text annotation.
+    /// Renders a text annotation using CTFramesetter for native CG multiline text layout.
+    /// Supports containerWidth for text wrapping.
     private func renderText(
         _ annotation: TextAnnotation,
         in context: CGContext,
@@ -318,32 +319,49 @@ struct ImageExporter: Sendable {
     ) {
         guard !annotation.content.isEmpty else { return }
 
-        // Create attributed string
-        let font = NSFont(name: annotation.style.fontName, size: annotation.style.fontSize)
-            ?? NSFont.systemFont(ofSize: annotation.style.fontSize)
+        let font: NSFont = annotation.style.fontName == ".AppleSystemUIFont"
+            ? .systemFont(ofSize: annotation.style.fontSize)
+            : NSFont(name: annotation.style.fontName, size: annotation.style.fontSize)
+                ?? .systemFont(ofSize: annotation.style.fontSize)
 
-        let attributes: [NSAttributedString.Key: Any] = [
+        let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: annotation.style.color.nsColor
         ]
+        let attrString = NSAttributedString(string: annotation.content, attributes: attrs)
 
-        let attributedString = NSAttributedString(string: annotation.content, attributes: attributes)
+        let maxWidth: CGFloat = annotation.containerWidth ?? CGFloat.greatestFiniteMagnitude
 
-        // Draw text at position (transform Y coordinate)
-        let position = CGPoint(
-            x: annotation.position.x,
-            y: imageHeight - annotation.position.y - annotation.style.fontSize
+        // use CTFramesetter for native CG text layout (no intermediate bitmap, no flip issues)
+        let framesetter = CTFramesetterCreateWithAttributedString(attrString)
+        let suggestedSize = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter,
+            CFRange(location: 0, length: 0),
+            nil,
+            CGSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude),
+            nil
         )
 
-        // Save context state
+        let frameWidth = maxWidth == .greatestFiniteMagnitude ? suggestedSize.width : maxWidth
+        let frameHeight = suggestedSize.height
+
+        let framePath = CGMutablePath()
+        framePath.addRect(CGRect(x: 0, y: 0, width: frameWidth, height: frameHeight))
+
+        let frame = CTFramesetterCreateFrame(
+            framesetter,
+            CFRange(location: 0, length: attrString.length),
+            framePath,
+            nil
+        )
+
         context.saveGState()
-
-        // Create line and draw
-        let line = CTLineCreateWithAttributedString(attributedString)
-        context.textPosition = position
-        CTLineDraw(line, context)
-
-        // Restore context state
+        // translate to the bottom-left of the text area in CG coords
+        context.translateBy(
+            x: annotation.position.x,
+            y: imageHeight - annotation.position.y - frameHeight
+        )
+        CTFrameDraw(frame, context)
         context.restoreGState()
     }
 }

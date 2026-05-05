@@ -138,6 +138,9 @@ final class PreviewViewModel {
     /// Observable text content (mirrors textTool.currentText but tracked by @Observable)
     var _textInputContent: String = ""
 
+    /// Text container width during editing (nil = dynamic, non-nil = fixed wrap width in image coords)
+    var textInputContainerWidth: CGFloat?
+
     // MARK: - Annotation Selection & Editing
 
     /// Index of the currently selected annotation (nil = none selected)
@@ -395,6 +398,7 @@ final class PreviewViewModel {
             textTool.beginDrawing(at: point)
             // Update observable properties for text input UI
             _textInputContent = ""
+            textInputContainerWidth = nil
             _isWaitingForTextInput = true
             _textInputPosition = point
         }
@@ -466,6 +470,7 @@ final class PreviewViewModel {
         textTool.cancelDrawing()
         _currentAnnotation = nil
         _textInputContent = ""
+        textInputContainerWidth = nil
         _isWaitingForTextInput = false
         _textInputPosition = nil
         drawingUpdateCounter += 1
@@ -582,11 +587,30 @@ final class PreviewViewModel {
     func hitTest(at point: CGPoint) -> Int? {
         // Check in reverse order (top-most first)
         for (index, annotation) in annotations.enumerated().reversed() {
-            let bounds = annotation.bounds
-            // Add some padding for easier selection
-            let expandedBounds = bounds.insetBy(dx: -10, dy: -10)
-            if expandedBounds.contains(point) {
-                return index
+            switch annotation {
+            case .rectangle(let rect):
+                if rect.isFilled {
+                    // filled: hit anywhere inside
+                    let expandedBounds = rect.rect.insetBy(dx: -10, dy: -10)
+                    if expandedBounds.contains(point) { return index }
+                } else {
+                    // hollow: only hit near the stroke edges, pass through interior
+                    let hitMargin = max(rect.style.lineWidth / 2, 3) + 8
+                    let outerBounds = rect.rect.insetBy(dx: -hitMargin, dy: -hitMargin)
+                    let innerInset = max(rect.style.lineWidth / 2, 3) + 2
+                    let innerBounds = rect.rect.insetBy(dx: innerInset, dy: innerInset)
+                    if outerBounds.contains(point) {
+                        // if point is inside the hollow interior, skip (pass through)
+                        if innerBounds.width > 0, innerBounds.height > 0, innerBounds.contains(point) {
+                            continue
+                        }
+                        return index
+                    }
+                }
+
+            default:
+                let expandedBounds = annotation.bounds.insetBy(dx: -10, dy: -10)
+                if expandedBounds.contains(point) { return index }
             }
         }
         return nil
@@ -635,6 +659,7 @@ final class PreviewViewModel {
         textTool.beginDrawing(at: textAnnotation.position)
         textTool.updateText(textAnnotation.content)
         _textInputContent = textAnnotation.content
+        textInputContainerWidth = textAnnotation.containerWidth
 
         _isWaitingForTextInput = true
         _textInputPosition = textAnnotation.position
@@ -906,19 +931,26 @@ final class PreviewViewModel {
                case .text(var textAnnotation) = annotations[editIndex] {
                 pushUndoState()
                 textAnnotation.content = text
+                textAnnotation.containerWidth = textInputContainerWidth
                 screenshot = screenshot.replacingAnnotation(at: editIndex, with: .text(textAnnotation))
                 redoStack.removeAll()
             }
             editingAnnotationIndex = nil
             textTool.cancelDrawing()
         } else {
-            // Creating new annotation
+            // Creating new annotation (attach containerWidth if set)
             if let annotation = textTool.commitText() {
-                addAnnotation(annotation)
+                if let cw = textInputContainerWidth, case .text(var textAnno) = annotation {
+                    textAnno.containerWidth = cw
+                    addAnnotation(.text(textAnno))
+                } else {
+                    addAnnotation(annotation)
+                }
             }
         }
         // Reset observable text input state
         _textInputContent = ""
+        textInputContainerWidth = nil
         _isWaitingForTextInput = false
         _textInputPosition = nil
     }
