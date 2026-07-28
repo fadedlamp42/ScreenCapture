@@ -12,6 +12,11 @@ final class PreviewWindow: NSPanel {
     /// The hosting view for SwiftUI content
     private var hostingView: NSHostingView<PreviewContentView>?
 
+    /// Last observed value of the view model's image size change counter,
+    /// used to detect when the window needs to resize to fit a new image
+    @MainActor
+    private var lastImageSizeChangeCounter = 0
+
     // MARK: - Initialization
 
     /// Creates a new preview window for the given screenshot.
@@ -89,7 +94,7 @@ final class PreviewWindow: NSPanel {
     @MainActor
     private func observeImageSizeChanges() {
         // Track the current counter value
-        var lastCounter = viewModel.imageSizeChangeCounter
+        lastImageSizeChangeCounter = viewModel.imageSizeChangeCounter
 
         // Use a timer to periodically check for changes (more reliable than withObservationTracking)
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
@@ -100,8 +105,8 @@ final class PreviewWindow: NSPanel {
 
             Task { @MainActor in
                 let currentCounter = self.viewModel.imageSizeChangeCounter
-                if currentCounter != lastCounter {
-                    lastCounter = currentCounter
+                if currentCounter != self.lastImageSizeChangeCounter {
+                    self.lastImageSizeChangeCounter = currentCounter
                     self.resizeToFitImage()
                 }
             }
